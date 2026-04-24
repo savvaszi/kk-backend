@@ -18,6 +18,7 @@ app.use(helmet());
 app.use(cors({ origin: origins, credentials: true }));
 app.use(express.json());
 
+app.get('/', (_, res) => res.json({ name: 'KryptoKnight API', version: '1.0.0', status: 'ok' }));
 app.get('/health', (_, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
 app.use('/auth', authRouter);
