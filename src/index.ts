@@ -2,10 +2,14 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { initDb } from './db/index.js';
 import authRouter from './routes/auth.js';
 import meRouter from './routes/me.js';
 import adminRouter from './routes/admin.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
 const PORT = parseInt(process.env.PORT ?? '4000', 10);
@@ -14,11 +18,12 @@ const origins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
   : true;
 
-app.use(helmet());
+app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({ origin: origins, credentials: true }));
 app.use(express.json());
+app.use(express.static(path.join(__dirname, '..', 'public')));
 
-app.get('/', (_, res) => res.json({ name: 'KryptoKnight API', version: '1.0.0', status: 'ok' }));
+app.get('/', (_, res) => res.redirect('/login.html'));
 app.get('/health', (_, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
 app.use('/auth', authRouter);
