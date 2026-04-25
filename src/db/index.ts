@@ -38,6 +38,7 @@ export async function initDb() {
       sms_notifications BOOLEAN DEFAULT FALSE NOT NULL,
       push_notifications BOOLEAN DEFAULT FALSE NOT NULL,
       is_admin BOOLEAN DEFAULT FALSE NOT NULL,
+      fireblocks_vault_id VARCHAR(100),
       created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
       updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
       last_seen_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
@@ -118,6 +119,9 @@ export async function initDb() {
       updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
     )
   `;
+
+  // Add fireblocks_vault_id column if missing (safe migration)
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS fireblocks_vault_id VARCHAR(100)`;
 
   // Seed default platform settings
   await sql`

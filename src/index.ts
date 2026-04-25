@@ -8,6 +8,8 @@ import { initDb } from './db/index.js';
 import authRouter from './routes/auth.js';
 import meRouter from './routes/me.js';
 import adminRouter from './routes/admin.js';
+import fireblocksAdminRouter from './routes/fireblocks-admin.js';
+import fireblocksUserRouter from './routes/fireblocks-me.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -28,7 +30,24 @@ app.get('/health', (_, res) => res.json({ status: 'ok', timestamp: new Date().to
 
 app.use('/auth', authRouter);
 app.use('/me', meRouter);
+app.use('/me/fireblocks', fireblocksUserRouter);
 app.use('/admin', adminRouter);
+app.use('/admin/fireblocks', fireblocksAdminRouter);
+
+// Fireblocks webhook receiver
+app.post('/webhooks/fireblocks', async (req, res) => {
+  const { logAudit } = await import('./lib/audit.js');
+  const event = req.body;
+  const type = event?.type ?? 'UNKNOWN';
+  const txId = event?.data?.id ?? event?.data?.txId ?? '';
+  await logAudit({
+    action: `Fireblocks Webhook: ${type}`,
+    detail: txId ? `Transaction ${txId}` : JSON.stringify(event).slice(0, 200),
+    type: 'webhook',
+    severity: 'info',
+  }).catch(() => {});
+  res.json({ success: true });
+});
 
 app.use((_, res) => res.status(404).json({ success: false, error: 'Not found' }));
 

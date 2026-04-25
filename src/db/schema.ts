@@ -29,6 +29,7 @@ export const users = pgTable('users', {
   smsNotifications: boolean('sms_notifications').default(false).notNull(),
   pushNotifications: boolean('push_notifications').default(false).notNull(),
   isAdmin: boolean('is_admin').default(false).notNull(),
+  fireblocksVaultId: varchar('fireblocks_vault_id', { length: 100 }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).defaultNow().notNull(),

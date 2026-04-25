@@ -6,7 +6,7 @@ interface AuditEntry {
   userName?: string | null;
   action: string;
   detail?: string;
-  type: 'auth' | 'user' | 'api' | 'security' | 'wallet';
+  type: 'auth' | 'user' | 'api' | 'security' | 'wallet' | 'admin' | 'webhook';
   severity: 'info' | 'warning' | 'danger' | 'success';
   ipAddress?: string;
   metadata?: Record<string, unknown>;

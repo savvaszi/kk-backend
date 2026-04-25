@@ -100,6 +100,10 @@ const Icons = {
   logout:'M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4 M16 17l5-5-5-5 M21 12H9',
   lock:'M19 11H5a2 2 0 00-2 2v7a2 2 0 002 2h14a2 2 0 002-2v-7a2 2 0 00-2-2 M17 11V7a5 5 0 00-10 0v4',
   activity:'M22 12h-4l-3 9L9 3l-3 9H2',
+  fireblocks:'M12 2L2 7l10 5 10-5-10-5 M2 17l10 5 10-5 M2 12l10 5 10-5',
+  send:'M22 2L11 13 M22 2l-7 20-4-9-9-4 20-7',
+  arrowDown:'M12 5v14 M5 12l7 7 7-7',
+  network:'M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v4m0 0H5m4 0h10M9 7v10m0 0H5a2 2 0 01-2-2v-4m6 6h10a2 2 0 002-2v-4m0 0h-6',
 };
 
 // ── Shared UI ─────────────────────────────────────────────────
@@ -618,15 +622,235 @@ const PageSettings = ({ settings, reload }) => {
   );
 };
 
+// ── Fireblocks Page ───────────────────────────────────────────
+const PageFireblocks = ({ users }) => {
+  const [tab, setTab] = useState('vaults');
+  const [vaults, setVaults] = useState([]);
+  const [txs, setTxs] = useState([]);
+  const [network, setNetwork] = useState([]);
+  const [staking, setStaking] = useState([]);
+  const [fbStatus, setFbStatus] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [createForm, setCreateForm] = useState({ userId:'', name:'' });
+  const [creating, setCreating] = useState(false);
+
+  useEffect(() => {
+    api('/admin/fireblocks/status').then(r => r.success && setFbStatus(r.data));
+  }, []);
+
+  useEffect(() => {
+    if (!fbStatus?.configured) return;
+    setLoading(true);
+    const fetchers = {
+      vaults: () => api('/admin/fireblocks/vaults').then(r => r.success && setVaults(r.data?.accounts || r.data || [])),
+      transactions: () => api('/admin/fireblocks/transactions?limit=50').then(r => r.success && setTxs(r.data || [])),
+      network: () => api('/admin/fireblocks/network').then(r => r.success && setNetwork(r.data || [])),
+      staking: () => api('/admin/fireblocks/staking/positions').then(r => r.success && setStaking(r.data || [])),
+    };
+    (fetchers[tab] || fetchers.vaults)().finally(() => setLoading(false));
+  }, [tab, fbStatus]);
+
+  const createVault = async () => {
+    if (!createForm.userId || !createForm.name) { setMsg('Select a user and enter a vault name.'); return; }
+    setCreating(true); setMsg('');
+    const r = await api('/admin/fireblocks/vaults', { method:'POST', body:JSON.stringify(createForm) });
+    setMsg(r.success ? `✓ Vault created: ${r.data?.id}` : r.error || 'Failed');
+    if (r.success) { setCreateForm({ userId:'', name:'' }); api('/admin/fireblocks/vaults').then(r2 => r2.success && setVaults(r2.data?.accounts || r2.data || [])); }
+    setCreating(false);
+  };
+
+  const txStatusColor = s => ({ COMPLETED:'green', CONFIRMING:'blue', PENDING_SIGNATURE:'yellow', FAILED:'red', CANCELLED:'gray' }[s] || 'gray');
+
+  if (!fbStatus) return <div style={{ padding:32, color:C.muted }}>Loading Fireblocks status…</div>;
+
+  if (!fbStatus.configured) return (
+    <div style={{ padding:32 }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14, padding:32, maxWidth:560 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:16 }}>
+          <Icon d={Icons.fireblocks} size={24} color={C.orange} stroke/>
+          <div style={{ fontSize:18, fontWeight:700 }}>Fireblocks Not Configured</div>
+        </div>
+        <p style={{ color:C.muted, fontSize:13, lineHeight:1.6, marginBottom:20 }}>
+          To enable Fireblocks custody integration, set the following environment variables in your Dokploy deployment:
+        </p>
+        <div style={{ background:'#0a0b0e', borderRadius:8, padding:16, fontFamily:'monospace', fontSize:12, color:'#a0a8c0', marginBottom:20 }}>
+          FIREBLOCKS_API_KEY=your_api_key<br/>
+          FIREBLOCKS_SECRET_KEY=your_rsa_private_key<br/>
+          FIREBLOCKS_BASE_URL=https://sandbox-api.fireblocks.io
+        </div>
+        <p style={{ color:C.muted, fontSize:12 }}>
+          Get your API credentials from the Fireblocks Console → Settings → API Keys.
+          Use the sandbox URL for testing.
+        </p>
+      </div>
+    </div>
+  );
+
+  const TABS = ['vaults','transactions','network','staking'];
+  return (
+    <div style={{ padding:28, display:'flex', flexDirection:'column', gap:22 }}>
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+        <div>
+          <div style={{ fontSize:20, fontWeight:700, display:'flex', alignItems:'center', gap:10 }}>
+            <Icon d={Icons.fireblocks} size={20} color={C.orange} stroke/> Fireblocks Integration
+          </div>
+          <div style={{ fontSize:12, color:C.muted, marginTop:4 }}>MPC custody, vaults, transactions, and network connections</div>
+        </div>
+        <Badge color="green">Connected</Badge>
+      </div>
+
+      {/* Tabs */}
+      <div style={{ display:'flex', gap:4, borderBottom:`1px solid ${C.border}`, paddingBottom:0 }}>
+        {TABS.map(t => (
+          <button key={t} onClick={()=>setTab(t)} style={{ padding:'8px 18px', background:'none', border:'none', borderBottom:tab===t?`2px solid ${C.orange}`:'2px solid transparent', color:tab===t?C.orange:C.muted, fontSize:13, fontWeight:600, cursor:'pointer', textTransform:'capitalize' }}>
+            {t}
+          </button>
+        ))}
+      </div>
+
+      {/* Create Vault */}
+      {tab==='vaults' && (
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:20 }}>
+          <div style={{ fontWeight:600, fontSize:14, marginBottom:14 }}>Create Vault Account for User</div>
+          {msg && <div style={{ fontSize:12, color:msg.startsWith('✓')?C.green:C.red, marginBottom:12 }}>{msg}</div>}
+          <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
+            <select value={createForm.userId} onChange={e=>setCreateForm(f=>({...f,userId:e.target.value,name:users.find(u=>u.id===e.target.value)?.email?.split('@')[0]||''}))}
+              style={{ background:'#0a0b0e', border:`1px solid ${C.border}`, borderRadius:8, color:C.text, padding:'8px 12px', fontSize:13, minWidth:220 }}>
+              <option value="">Select user…</option>
+              {users.map(u=><option key={u.id} value={u.id}>{u.email}</option>)}
+            </select>
+            <input value={createForm.name} onChange={e=>setCreateForm(f=>({...f,name:e.target.value}))} placeholder="Vault name"
+              style={{ background:'#0a0b0e', border:`1px solid ${C.border}`, borderRadius:8, color:C.text, padding:'8px 12px', fontSize:13, flex:1, minWidth:160 }}/>
+            <Btn onClick={createVault} disabled={creating} icon="plus">{creating?'Creating…':'Create Vault'}</Btn>
+          </div>
+        </div>
+      )}
+
+      {loading ? <Loading/> : (
+        <>
+          {/* Vaults */}
+          {tab==='vaults' && (
+            <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, overflow:'hidden' }}>
+              <div style={{ padding:'16px 20px', borderBottom:`1px solid ${C.border}`, fontWeight:600, fontSize:14 }}>
+                Vault Accounts ({vaults.length})
+              </div>
+              {vaults.length===0 ? <div style={{ padding:24, color:C.muted, fontSize:13 }}>No vault accounts found.</div> : (
+                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+                  <thead><tr style={{ borderBottom:`1px solid ${C.border}` }}>
+                    {['ID','Name','Assets','Auto Fuel'].map(h=><th key={h} style={{ padding:'10px 20px', textAlign:'left', color:C.muted, fontWeight:600, fontSize:11 }}>{h}</th>)}
+                  </tr></thead>
+                  <tbody>
+                    {vaults.map(v=>(
+                      <tr key={v.id} style={{ borderBottom:`1px solid ${C.border}` }} onMouseEnter={e=>e.currentTarget.style.background=C.card2} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                        <td style={{ padding:'12px 20px', fontFamily:'monospace', color:C.muted, fontSize:11 }}>{v.id}</td>
+                        <td style={{ padding:'12px 20px', fontWeight:600 }}>{v.name}</td>
+                        <td style={{ padding:'12px 20px' }}>{(v.assets||[]).length} asset(s)</td>
+                        <td style={{ padding:'12px 20px' }}><Badge color={v.autoFuel?'green':'gray'}>{v.autoFuel?'On':'Off'}</Badge></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
+
+          {/* Transactions */}
+          {tab==='transactions' && (
+            <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, overflow:'hidden' }}>
+              <div style={{ padding:'16px 20px', borderBottom:`1px solid ${C.border}`, fontWeight:600, fontSize:14 }}>
+                Recent Transactions ({txs.length})
+              </div>
+              {txs.length===0 ? <div style={{ padding:24, color:C.muted, fontSize:13 }}>No transactions found.</div> : (
+                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+                  <thead><tr style={{ borderBottom:`1px solid ${C.border}` }}>
+                    {['TX ID','Asset','Amount','Source → Dest','Status','Created'].map(h=><th key={h} style={{ padding:'10px 16px', textAlign:'left', color:C.muted, fontWeight:600, fontSize:11 }}>{h}</th>)}
+                  </tr></thead>
+                  <tbody>
+                    {txs.map(tx=>(
+                      <tr key={tx.id} style={{ borderBottom:`1px solid ${C.border}` }} onMouseEnter={e=>e.currentTarget.style.background=C.card2} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                        <td style={{ padding:'10px 16px', fontFamily:'monospace', fontSize:11, color:C.muted }}>{(tx.id||'').slice(0,12)}…</td>
+                        <td style={{ padding:'10px 16px', fontWeight:600 }}>{tx.assetId}</td>
+                        <td style={{ padding:'10px 16px' }}>{tx.amount}</td>
+                        <td style={{ padding:'10px 16px', fontSize:11, color:C.muted }}>{tx.source?.name||tx.source?.id||'—'} → {tx.destination?.name||tx.destination?.id||'—'}</td>
+                        <td style={{ padding:'10px 16px' }}><Badge color={txStatusColor(tx.status)}>{tx.status}</Badge></td>
+                        <td style={{ padding:'10px 16px', color:C.muted, fontSize:11 }}>{fmtDate(tx.createdAt)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
+
+          {/* Network */}
+          {tab==='network' && (
+            <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, overflow:'hidden' }}>
+              <div style={{ padding:'16px 20px', borderBottom:`1px solid ${C.border}`, fontWeight:600, fontSize:14 }}>
+                Network Connections ({network.length})
+              </div>
+              {network.length===0 ? <div style={{ padding:24, color:C.muted, fontSize:13 }}>No network connections configured.</div> : (
+                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+                  <thead><tr style={{ borderBottom:`1px solid ${C.border}` }}>
+                    {['ID','Name','Status','Direction'].map(h=><th key={h} style={{ padding:'10px 20px', textAlign:'left', color:C.muted, fontWeight:600, fontSize:11 }}>{h}</th>)}
+                  </tr></thead>
+                  <tbody>
+                    {network.map(n=>(
+                      <tr key={n.localChannel?.id||n.id} style={{ borderBottom:`1px solid ${C.border}` }}>
+                        <td style={{ padding:'12px 20px', fontFamily:'monospace', fontSize:11, color:C.muted }}>{(n.localChannel?.id||n.id||'').slice(0,12)}…</td>
+                        <td style={{ padding:'12px 20px', fontWeight:600 }}>{n.localChannel?.name||n.name||'—'}</td>
+                        <td style={{ padding:'12px 20px' }}><Badge color={n.status==='CONNECTED'?'green':'gray'}>{n.status||'Unknown'}</Badge></td>
+                        <td style={{ padding:'12px 20px', color:C.muted }}>{n.direction||'—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
+
+          {/* Staking */}
+          {tab==='staking' && (
+            <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, overflow:'hidden' }}>
+              <div style={{ padding:'16px 20px', borderBottom:`1px solid ${C.border}`, fontWeight:600, fontSize:14 }}>
+                Staking Positions ({staking.length})
+              </div>
+              {staking.length===0 ? <div style={{ padding:24, color:C.muted, fontSize:13 }}>No staking positions found.</div> : (
+                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+                  <thead><tr style={{ borderBottom:`1px solid ${C.border}` }}>
+                    {['ID','Asset','Amount','Status','Provider'].map(h=><th key={h} style={{ padding:'10px 20px', textAlign:'left', color:C.muted, fontWeight:600, fontSize:11 }}>{h}</th>)}
+                  </tr></thead>
+                  <tbody>
+                    {staking.map(p=>(
+                      <tr key={p.id} style={{ borderBottom:`1px solid ${C.border}` }}>
+                        <td style={{ padding:'12px 20px', fontFamily:'monospace', fontSize:11, color:C.muted }}>{(p.id||'').slice(0,12)}</td>
+                        <td style={{ padding:'12px 20px', fontWeight:600 }}>{p.asset||p.assetId||'—'}</td>
+                        <td style={{ padding:'12px 20px' }}>{p.amount||'—'}</td>
+                        <td style={{ padding:'12px 20px' }}><Badge color={p.status==='ACTIVE'?'green':'gray'}>{p.status||'—'}</Badge></td>
+                        <td style={{ padding:'12px 20px', color:C.muted }}>{p.providerId||p.provider||'—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+};
+
 // ── Sidebar ───────────────────────────────────────────────────
 const NAV = [
-  { id:'dashboard', label:'Dashboard',     icon:'dashboard', sub:'Overview'        },
-  { id:'users',     label:'Users',         icon:'users',     sub:'User Management' },
-  { id:'security',  label:'Security',      icon:'security',  sub:'Threat Center'   },
-  { id:'api',       label:'API Keys',      icon:'api',       sub:'Developer Access'},
-  { id:'audit',     label:'Audit Log',     icon:'audit',     sub:'Activity Trail'  },
-  { id:'notifs',    label:'Notifications', icon:'bell',      sub:'Alerts'          },
-  { id:'settings',  label:'Settings',      icon:'settings',  sub:'Configuration'   },
+  { id:'dashboard',  label:'Dashboard',     icon:'dashboard',  sub:'Overview'        },
+  { id:'users',      label:'Users',         icon:'users',      sub:'User Management' },
+  { id:'security',   label:'Security',      icon:'security',   sub:'Threat Center'   },
+  { id:'api',        label:'API Keys',      icon:'api',        sub:'Developer Access'},
+  { id:'audit',      label:'Audit Log',     icon:'audit',      sub:'Activity Trail'  },
+  { id:'notifs',     label:'Notifications', icon:'bell',       sub:'Alerts'          },
+  { id:'fireblocks', label:'Fireblocks',    icon:'fireblocks', sub:'Custody & Vaults'},
+  { id:'settings',   label:'Settings',      icon:'settings',   sub:'Configuration'   },
 ];
 
 const Sidebar = ({ active, setActive, notifications }) => {
@@ -720,13 +944,14 @@ const App = () => {
   useEffect(() => { reload(); }, []);
 
   const pages = {
-    dashboard: () => <PageDashboard stats={stats} audit={audit}/>,
-    users:     () => <PageUsers users={users} reload={reload}/>,
-    security:  () => <PageSecurity users={users} sessions={sessions} stats={stats} reload={reload}/>,
-    api:       () => <PageAPIKeys apiKeys={apiKeysList} reload={reload}/>,
-    audit:     () => <PageAudit audit={audit}/>,
-    notifs:    () => <PageNotifications notifications={notifications} reload={reload}/>,
-    settings:  () => <PageSettings settings={settings} reload={reload}/>,
+    dashboard:  () => <PageDashboard stats={stats} audit={audit}/>,
+    users:      () => <PageUsers users={users} reload={reload}/>,
+    security:   () => <PageSecurity users={users} sessions={sessions} stats={stats} reload={reload}/>,
+    api:        () => <PageAPIKeys apiKeys={apiKeysList} reload={reload}/>,
+    audit:      () => <PageAudit audit={audit}/>,
+    notifs:     () => <PageNotifications notifications={notifications} reload={reload}/>,
+    fireblocks: () => <PageFireblocks users={users}/>,
+    settings:   () => <PageSettings settings={settings} reload={reload}/>,
   };
   const Page = pages[active] || pages.dashboard;
 

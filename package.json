@@ -9,13 +9,14 @@
     "dev": "tsx watch src/index.ts"
   },
   "dependencies": {
+    "@fireblocks/ts-sdk": "^17.0.0",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
+    "drizzle-orm": "^0.30.10",
     "express": "^4.19.2",
     "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
-    "drizzle-orm": "^0.30.10",
     "postgres": "^3.4.4"
   },
   "devDependencies": {
