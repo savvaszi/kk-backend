@@ -623,17 +623,38 @@ const PageSettings = ({ settings, reload }) => {
 };
 
 // ── Fireblocks Page ───────────────────────────────────────────
+const FbTable = ({ headers, rows, empty }) => (
+  rows.length===0 ? <div style={{ padding:24, color:C.muted, fontSize:13 }}>{empty||'No data.'}</div> : (
+    <div style={{ overflowX:'auto' }}>
+      <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+        <thead><tr style={{ borderBottom:`1px solid ${C.border}` }}>
+          {headers.map(h=><th key={h} style={{ padding:'10px 16px', textAlign:'left', color:C.muted, fontWeight:600, fontSize:11, whiteSpace:'nowrap' }}>{h}</th>)}
+        </tr></thead>
+        <tbody>{rows}</tbody>
+      </table>
+    </div>
+  )
+);
+
+const FbCard = ({ title, children, action }) => (
+  <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, overflow:'hidden' }}>
+    <div style={{ padding:'14px 20px', borderBottom:`1px solid ${C.border}`, fontWeight:600, fontSize:14, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+      <span>{title}</span>{action}
+    </div>
+    {children}
+  </div>
+);
+
 const PageFireblocks = ({ users }) => {
   const [tab, setTab] = useState('vaults');
-  const [vaults, setVaults] = useState([]);
-  const [txs, setTxs] = useState([]);
-  const [network, setNetwork] = useState([]);
-  const [staking, setStaking] = useState([]);
+  const [data, setData] = useState({});
   const [fbStatus, setFbStatus] = useState(null);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState('');
   const [createForm, setCreateForm] = useState({ userId:'', name:'' });
   const [creating, setCreating] = useState(false);
+
+  const txStatusColor = s => ({ COMPLETED:'green', CONFIRMING:'blue', BROADCASTING:'blue', PENDING_SIGNATURE:'yellow', PENDING_AUTHORIZATION:'yellow', FAILED:'red', CANCELLED:'gray', BLOCKED:'orange' }[s] || 'gray');
 
   useEffect(() => {
     api('/admin/fireblocks/status').then(r => r.success && setFbStatus(r.data));
@@ -642,25 +663,43 @@ const PageFireblocks = ({ users }) => {
   useEffect(() => {
     if (!fbStatus?.configured) return;
     setLoading(true);
-    const fetchers = {
-      vaults: () => api('/admin/fireblocks/vaults').then(r => r.success && setVaults(r.data?.accounts || r.data || [])),
-      transactions: () => api('/admin/fireblocks/transactions?limit=50').then(r => r.success && setTxs(r.data || [])),
-      network: () => api('/admin/fireblocks/network').then(r => r.success && setNetwork(r.data || [])),
-      staking: () => api('/admin/fireblocks/staking/positions').then(r => r.success && setStaking(r.data || [])),
+    const endpoints = {
+      vaults:       '/admin/fireblocks/vaults',
+      transactions: '/admin/fireblocks/transactions?limit=50',
+      staking:      '/admin/fireblocks/staking/positions',
+      policy:       '/admin/fireblocks/policy/active',
+      compliance:   '/admin/fireblocks/compliance/policy',
+      'gas-station':'/admin/fireblocks/gas-station',
+      exchange:     '/admin/fireblocks/exchange',
+      fiat:         '/admin/fireblocks/fiat',
+      ncw:          '/admin/fireblocks/ncw',
+      'audit-logs': '/admin/fireblocks/audit-logs',
+      nfts:         '/admin/fireblocks/nfts',
+      earn:         '/admin/fireblocks/earn/opportunities',
+      contracts:    '/admin/fireblocks/contracts/deployed',
+      workspace:    '/admin/fireblocks/workspace/users/console',
+      cosigners:    '/admin/fireblocks/cosigners',
+      'off-exchange':'/admin/fireblocks/off-exchange',
+      network:      '/admin/fireblocks/network',
     };
-    (fetchers[tab] || fetchers.vaults)().finally(() => setLoading(false));
+    const url = endpoints[tab];
+    if (!url) { setLoading(false); return; }
+    api(url).then(r => {
+      const val = r.data?.accounts || r.data?.rules || r.data?.entities || r.data || [];
+      setData(d => ({ ...d, [tab]: val }));
+    }).finally(() => setLoading(false));
   }, [tab, fbStatus]);
+
+  const tabData = data[tab] || [];
 
   const createVault = async () => {
     if (!createForm.userId || !createForm.name) { setMsg('Select a user and enter a vault name.'); return; }
     setCreating(true); setMsg('');
     const r = await api('/admin/fireblocks/vaults', { method:'POST', body:JSON.stringify(createForm) });
     setMsg(r.success ? `✓ Vault created: ${r.data?.id}` : r.error || 'Failed');
-    if (r.success) { setCreateForm({ userId:'', name:'' }); api('/admin/fireblocks/vaults').then(r2 => r2.success && setVaults(r2.data?.accounts || r2.data || [])); }
+    if (r.success) { setCreateForm({ userId:'', name:'' }); api('/admin/fireblocks/vaults').then(r2 => r2.success && setData(d=>({...d, vaults: r2.data?.accounts||r2.data||[]}))); }
     setCreating(false);
   };
-
-  const txStatusColor = s => ({ COMPLETED:'green', CONFIRMING:'blue', PENDING_SIGNATURE:'yellow', FAILED:'red', CANCELLED:'gray' }[s] || 'gray');
 
   if (!fbStatus) return <div style={{ padding:32, color:C.muted }}>Loading Fireblocks status…</div>;
 
@@ -687,34 +726,58 @@ const PageFireblocks = ({ users }) => {
     </div>
   );
 
-  const TABS = ['vaults','transactions','network','staking'];
+  const TABS = [
+    { id:'vaults',       label:'Vaults' },
+    { id:'transactions', label:'Transactions' },
+    { id:'staking',      label:'Staking' },
+    { id:'policy',       label:'Policy Engine' },
+    { id:'compliance',   label:'AML/Compliance' },
+    { id:'gas-station',  label:'Gas Station' },
+    { id:'exchange',     label:'Exchange' },
+    { id:'fiat',         label:'Fiat' },
+    { id:'ncw',          label:'NCW Wallets' },
+    { id:'audit-logs',   label:'Audit Logs' },
+    { id:'nfts',         label:'NFTs' },
+    { id:'earn',         label:'Earn/Yield' },
+    { id:'contracts',    label:'Smart Contracts' },
+    { id:'workspace',    label:'Workspace Users' },
+    { id:'cosigners',    label:'Cosigners' },
+    { id:'off-exchange', label:'Off-Exchange' },
+    { id:'network',      label:'Network' },
+  ];
+
+  const td = (content, mono=false) => (
+    <td style={{ padding:'10px 16px', fontFamily:mono?'monospace':'inherit', fontSize:mono?11:13, color:mono?C.muted:C.text }}>{content}</td>
+  );
+
   return (
-    <div style={{ padding:28, display:'flex', flexDirection:'column', gap:22 }}>
+    <div style={{ padding:28, display:'flex', flexDirection:'column', gap:18 }}>
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
         <div>
           <div style={{ fontSize:20, fontWeight:700, display:'flex', alignItems:'center', gap:10 }}>
             <Icon d={Icons.fireblocks} size={20} color={C.orange} stroke/> Fireblocks Integration
           </div>
-          <div style={{ fontSize:12, color:C.muted, marginTop:4 }}>MPC custody, vaults, transactions, and network connections</div>
+          <div style={{ fontSize:12, color:C.muted, marginTop:4 }}>Full MPC custody — vaults, policy, AML, staking, NCW, earn &amp; more</div>
         </div>
         <Badge color="green">Connected</Badge>
       </div>
 
-      {/* Tabs */}
-      <div style={{ display:'flex', gap:4, borderBottom:`1px solid ${C.border}`, paddingBottom:0 }}>
-        {TABS.map(t => (
-          <button key={t} onClick={()=>setTab(t)} style={{ padding:'8px 18px', background:'none', border:'none', borderBottom:tab===t?`2px solid ${C.orange}`:'2px solid transparent', color:tab===t?C.orange:C.muted, fontSize:13, fontWeight:600, cursor:'pointer', textTransform:'capitalize' }}>
-            {t}
-          </button>
-        ))}
+      {/* Tab bar — scrollable */}
+      <div style={{ overflowX:'auto', borderBottom:`1px solid ${C.border}` }}>
+        <div style={{ display:'flex', gap:2, minWidth:'max-content' }}>
+          {TABS.map(t => (
+            <button key={t.id} onClick={()=>setTab(t.id)} style={{ padding:'8px 14px', background:'none', border:'none', borderBottom:tab===t.id?`2px solid ${C.orange}`:'2px solid transparent', color:tab===t.id?C.orange:C.muted, fontSize:12, fontWeight:600, cursor:'pointer', whiteSpace:'nowrap' }}>
+              {t.label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* Create Vault */}
+      {/* ── Vaults: Create form ── */}
       {tab==='vaults' && (
-        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:20 }}>
-          <div style={{ fontWeight:600, fontSize:14, marginBottom:14 }}>Create Vault Account for User</div>
-          {msg && <div style={{ fontSize:12, color:msg.startsWith('✓')?C.green:C.red, marginBottom:12 }}>{msg}</div>}
-          <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
+        <FbCard title="Create Vault Account for User">
+          {msg && <div style={{ padding:'8px 20px', fontSize:12, color:msg.startsWith('✓')?C.green:C.red }}>{msg}</div>}
+          <div style={{ padding:'14px 20px', display:'flex', gap:10, flexWrap:'wrap' }}>
             <select value={createForm.userId} onChange={e=>setCreateForm(f=>({...f,userId:e.target.value,name:users.find(u=>u.id===e.target.value)?.email?.split('@')[0]||''}))}
               style={{ background:'#0a0b0e', border:`1px solid ${C.border}`, borderRadius:8, color:C.text, padding:'8px 12px', fontSize:13, minWidth:220 }}>
               <option value="">Select user…</option>
@@ -724,116 +787,243 @@ const PageFireblocks = ({ users }) => {
               style={{ background:'#0a0b0e', border:`1px solid ${C.border}`, borderRadius:8, color:C.text, padding:'8px 12px', fontSize:13, flex:1, minWidth:160 }}/>
             <Btn onClick={createVault} disabled={creating} icon="plus">{creating?'Creating…':'Create Vault'}</Btn>
           </div>
-        </div>
+        </FbCard>
       )}
 
       {loading ? <Loading/> : (
         <>
-          {/* Vaults */}
+          {/* VAULTS */}
           {tab==='vaults' && (
-            <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, overflow:'hidden' }}>
-              <div style={{ padding:'16px 20px', borderBottom:`1px solid ${C.border}`, fontWeight:600, fontSize:14 }}>
-                Vault Accounts ({vaults.length})
-              </div>
-              {vaults.length===0 ? <div style={{ padding:24, color:C.muted, fontSize:13 }}>No vault accounts found.</div> : (
-                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
-                  <thead><tr style={{ borderBottom:`1px solid ${C.border}` }}>
-                    {['ID','Name','Assets','Auto Fuel'].map(h=><th key={h} style={{ padding:'10px 20px', textAlign:'left', color:C.muted, fontWeight:600, fontSize:11 }}>{h}</th>)}
-                  </tr></thead>
-                  <tbody>
-                    {vaults.map(v=>(
-                      <tr key={v.id} style={{ borderBottom:`1px solid ${C.border}` }} onMouseEnter={e=>e.currentTarget.style.background=C.card2} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                        <td style={{ padding:'12px 20px', fontFamily:'monospace', color:C.muted, fontSize:11 }}>{v.id}</td>
-                        <td style={{ padding:'12px 20px', fontWeight:600 }}>{v.name}</td>
-                        <td style={{ padding:'12px 20px' }}>{(v.assets||[]).length} asset(s)</td>
-                        <td style={{ padding:'12px 20px' }}><Badge color={v.autoFuel?'green':'gray'}>{v.autoFuel?'On':'Off'}</Badge></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
+            <FbCard title={`Vault Accounts (${tabData.length})`}>
+              <FbTable empty="No vaults found." headers={['ID','Name','Assets','Auto Fuel']} rows={tabData.map(v=>(
+                <tr key={v.id} style={{ borderBottom:`1px solid ${C.border}` }}>
+                  {td(v.id,true)}{td(v.name)}{td(`${(v.assets||[]).length} asset(s)`)}<td style={{ padding:'10px 16px' }}><Badge color={v.autoFuel?'green':'gray'}>{v.autoFuel?'On':'Off'}</Badge></td>
+                </tr>
+              ))}/>
+            </FbCard>
           )}
 
-          {/* Transactions */}
+          {/* TRANSACTIONS */}
           {tab==='transactions' && (
-            <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, overflow:'hidden' }}>
-              <div style={{ padding:'16px 20px', borderBottom:`1px solid ${C.border}`, fontWeight:600, fontSize:14 }}>
-                Recent Transactions ({txs.length})
-              </div>
-              {txs.length===0 ? <div style={{ padding:24, color:C.muted, fontSize:13 }}>No transactions found.</div> : (
-                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
-                  <thead><tr style={{ borderBottom:`1px solid ${C.border}` }}>
-                    {['TX ID','Asset','Amount','Source → Dest','Status','Created'].map(h=><th key={h} style={{ padding:'10px 16px', textAlign:'left', color:C.muted, fontWeight:600, fontSize:11 }}>{h}</th>)}
-                  </tr></thead>
-                  <tbody>
-                    {txs.map(tx=>(
-                      <tr key={tx.id} style={{ borderBottom:`1px solid ${C.border}` }} onMouseEnter={e=>e.currentTarget.style.background=C.card2} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                        <td style={{ padding:'10px 16px', fontFamily:'monospace', fontSize:11, color:C.muted }}>{(tx.id||'').slice(0,12)}…</td>
-                        <td style={{ padding:'10px 16px', fontWeight:600 }}>{tx.assetId}</td>
-                        <td style={{ padding:'10px 16px' }}>{tx.amount}</td>
-                        <td style={{ padding:'10px 16px', fontSize:11, color:C.muted }}>{tx.source?.name||tx.source?.id||'—'} → {tx.destination?.name||tx.destination?.id||'—'}</td>
-                        <td style={{ padding:'10px 16px' }}><Badge color={txStatusColor(tx.status)}>{tx.status}</Badge></td>
-                        <td style={{ padding:'10px 16px', color:C.muted, fontSize:11 }}>{fmtDate(tx.createdAt)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
+            <FbCard title={`Recent Transactions (${tabData.length})`}>
+              <FbTable empty="No transactions." headers={['TX ID','Asset','Amount','Source → Dest','Status','Date']} rows={tabData.map(tx=>(
+                <tr key={tx.id} style={{ borderBottom:`1px solid ${C.border}` }}>
+                  {td((tx.id||'').slice(0,12)+'…',true)}{td(tx.assetId)}{td(tx.amount)}
+                  {td(`${tx.source?.name||tx.source?.id||'—'} → ${tx.destination?.name||tx.destination?.id||'—'}`,true)}
+                  <td style={{ padding:'10px 16px' }}><Badge color={txStatusColor(tx.status)}>{tx.status}</Badge></td>
+                  {td(fmtDate(tx.createdAt),true)}
+                </tr>
+              ))}/>
+            </FbCard>
           )}
 
-          {/* Network */}
-          {tab==='network' && (
-            <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, overflow:'hidden' }}>
-              <div style={{ padding:'16px 20px', borderBottom:`1px solid ${C.border}`, fontWeight:600, fontSize:14 }}>
-                Network Connections ({network.length})
-              </div>
-              {network.length===0 ? <div style={{ padding:24, color:C.muted, fontSize:13 }}>No network connections configured.</div> : (
-                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
-                  <thead><tr style={{ borderBottom:`1px solid ${C.border}` }}>
-                    {['ID','Name','Status','Direction'].map(h=><th key={h} style={{ padding:'10px 20px', textAlign:'left', color:C.muted, fontWeight:600, fontSize:11 }}>{h}</th>)}
-                  </tr></thead>
-                  <tbody>
-                    {network.map(n=>(
-                      <tr key={n.localChannel?.id||n.id} style={{ borderBottom:`1px solid ${C.border}` }}>
-                        <td style={{ padding:'12px 20px', fontFamily:'monospace', fontSize:11, color:C.muted }}>{(n.localChannel?.id||n.id||'').slice(0,12)}…</td>
-                        <td style={{ padding:'12px 20px', fontWeight:600 }}>{n.localChannel?.name||n.name||'—'}</td>
-                        <td style={{ padding:'12px 20px' }}><Badge color={n.status==='CONNECTED'?'green':'gray'}>{n.status||'Unknown'}</Badge></td>
-                        <td style={{ padding:'12px 20px', color:C.muted }}>{n.direction||'—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          )}
-
-          {/* Staking */}
+          {/* STAKING */}
           {tab==='staking' && (
-            <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, overflow:'hidden' }}>
-              <div style={{ padding:'16px 20px', borderBottom:`1px solid ${C.border}`, fontWeight:600, fontSize:14 }}>
-                Staking Positions ({staking.length})
+            <FbCard title={`Staking Positions (${Array.isArray(tabData)?tabData.length:0})`}>
+              <FbTable empty="No staking positions." headers={['ID','Asset','Amount','Status','Provider','Vault']} rows={(Array.isArray(tabData)?tabData:[]).map(p=>(
+                <tr key={p.id} style={{ borderBottom:`1px solid ${C.border}` }}>
+                  {td((p.id||'').slice(0,10),true)}{td(p.asset||p.assetId||'—')}{td(p.amount||'—')}
+                  <td style={{ padding:'10px 16px' }}><Badge color={p.status==='ACTIVE'?'green':p.status==='UNSTAKING'?'yellow':'gray'}>{p.status||'—'}</Badge></td>
+                  {td(p.providerId||p.provider||'—')}{td(p.vaultAccountId||'—',true)}
+                </tr>
+              ))}/>
+            </FbCard>
+          )}
+
+          {/* POLICY ENGINE */}
+          {tab==='policy' && (
+            <FbCard title="Active TAP Policy Rules">
+              {(() => {
+                const rules = Array.isArray(tabData) ? tabData : (tabData?.rules||[]);
+                return <FbTable empty="No policy rules configured." headers={['Rule ID','Name','Status','Action','Operators']} rows={rules.map((r,i)=>(
+                  <tr key={r.id||i} style={{ borderBottom:`1px solid ${C.border}` }}>
+                    {td(r.id||`#${i+1}`,true)}{td(r.name||'—')}
+                    <td style={{ padding:'10px 16px' }}><Badge color={r.status==='ACTIVE'?'green':'gray'}>{r.status||'ACTIVE'}</Badge></td>
+                    {td(r.action?.type||r.action||'—')}{td((r.operators||[]).map(o=>o.type||o).join(', ')||'—')}
+                  </tr>
+                ))}/>;
+              })()}
+            </FbCard>
+          )}
+
+          {/* AML / COMPLIANCE */}
+          {tab==='compliance' && (
+            <FbCard title="AML Screening Policy">
+              <div style={{ padding:20 }}>
+                {(() => {
+                  const policy = Array.isArray(tabData) ? null : tabData;
+                  if (!policy) return <div style={{ color:C.muted, fontSize:13 }}>No compliance policy data.</div>;
+                  return (
+                    <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))', gap:16 }}>
+                      {Object.entries(policy).map(([k,v])=>(
+                        <div key={k} style={{ background:C.card2, borderRadius:8, padding:14 }}>
+                          <div style={{ fontSize:11, color:C.muted, marginBottom:4, textTransform:'uppercase' }}>{k}</div>
+                          <div style={{ fontWeight:600, fontSize:13 }}>{String(v)}</div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
-              {staking.length===0 ? <div style={{ padding:24, color:C.muted, fontSize:13 }}>No staking positions found.</div> : (
-                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
-                  <thead><tr style={{ borderBottom:`1px solid ${C.border}` }}>
-                    {['ID','Asset','Amount','Status','Provider'].map(h=><th key={h} style={{ padding:'10px 20px', textAlign:'left', color:C.muted, fontWeight:600, fontSize:11 }}>{h}</th>)}
-                  </tr></thead>
-                  <tbody>
-                    {staking.map(p=>(
-                      <tr key={p.id} style={{ borderBottom:`1px solid ${C.border}` }}>
-                        <td style={{ padding:'12px 20px', fontFamily:'monospace', fontSize:11, color:C.muted }}>{(p.id||'').slice(0,12)}</td>
-                        <td style={{ padding:'12px 20px', fontWeight:600 }}>{p.asset||p.assetId||'—'}</td>
-                        <td style={{ padding:'12px 20px' }}>{p.amount||'—'}</td>
-                        <td style={{ padding:'12px 20px' }}><Badge color={p.status==='ACTIVE'?'green':'gray'}>{p.status||'—'}</Badge></td>
-                        <td style={{ padding:'12px 20px', color:C.muted }}>{p.providerId||p.provider||'—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
+            </FbCard>
+          )}
+
+          {/* GAS STATION */}
+          {tab==='gas-station' && (
+            <FbCard title="Gas Station Configuration">
+              <div style={{ padding:20 }}>
+                {(() => {
+                  const gs = Array.isArray(tabData) ? null : tabData;
+                  if (!gs) return <div style={{ color:C.muted, fontSize:13 }}>No gas station data. Gas Station may not be enabled on this workspace.</div>;
+                  return (
+                    <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))', gap:16 }}>
+                      {Object.entries(gs).map(([k,v])=>(
+                        <div key={k} style={{ background:C.card2, borderRadius:8, padding:14 }}>
+                          <div style={{ fontSize:11, color:C.muted, marginBottom:4, textTransform:'uppercase' }}>{k.replace(/([A-Z])/g,' $1').trim()}</div>
+                          <div style={{ fontWeight:600, fontSize:13 }}>{typeof v==='object'?JSON.stringify(v):String(v)}</div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
+            </FbCard>
+          )}
+
+          {/* EXCHANGE */}
+          {tab==='exchange' && (
+            <FbCard title={`Exchange Accounts (${Array.isArray(tabData)?tabData.length:0})`}>
+              <FbTable empty="No exchange accounts." headers={['ID','Name','Type','Status']} rows={(Array.isArray(tabData)?tabData:[]).map(e=>(
+                <tr key={e.id} style={{ borderBottom:`1px solid ${C.border}` }}>
+                  {td(e.id,true)}{td(e.name||'—')}{td(e.type||'—')}
+                  <td style={{ padding:'10px 16px' }}><Badge color={e.status==='CONNECTED'||e.status==='ACTIVE'?'green':'gray'}>{e.status||'—'}</Badge></td>
+                </tr>
+              ))}/>
+            </FbCard>
+          )}
+
+          {/* FIAT */}
+          {tab==='fiat' && (
+            <FbCard title={`Fiat Accounts (${Array.isArray(tabData)?tabData.length:0})`}>
+              <FbTable empty="No fiat accounts." headers={['ID','Name','Currency','Balance']} rows={(Array.isArray(tabData)?tabData:[]).map(f=>(
+                <tr key={f.id} style={{ borderBottom:`1px solid ${C.border}` }}>
+                  {td(f.id,true)}{td(f.name||'—')}{td(f.currency||'—')}{td(f.balance||'—')}
+                </tr>
+              ))}/>
+            </FbCard>
+          )}
+
+          {/* NCW */}
+          {tab==='ncw' && (
+            <FbCard title={`NCW / Embedded Wallets (${Array.isArray(tabData)?tabData.length:0})`}
+              action={<Btn onClick={()=>api('/admin/fireblocks/ncw',{method:'POST',body:JSON.stringify({})}).then(r=>r.success&&alert('Wallet created: '+r.data?.walletId))} icon="plus">Create Wallet</Btn>}>
+              <FbTable empty="No embedded wallets." headers={['Wallet ID','Status','Created']} rows={(Array.isArray(tabData)?tabData:[]).map(w=>(
+                <tr key={w.walletId} style={{ borderBottom:`1px solid ${C.border}` }}>
+                  {td(w.walletId,true)}
+                  <td style={{ padding:'10px 16px' }}><Badge color={w.status==='ACTIVE'?'green':'gray'}>{w.status||'—'}</Badge></td>
+                  {td(fmtDate(w.createdAt||w.createTime),true)}
+                </tr>
+              ))}/>
+            </FbCard>
+          )}
+
+          {/* AUDIT LOGS */}
+          {tab==='audit-logs' && (
+            <FbCard title="Fireblocks Audit Log">
+              <FbTable empty="No audit log entries." headers={['Time','User','Event','ID']} rows={(Array.isArray(tabData)?tabData:[]).map((l,i)=>(
+                <tr key={l.id||i} style={{ borderBottom:`1px solid ${C.border}` }}>
+                  {td(fmtDate(l.timestamp||l.createdAt),true)}{td(l.user||l.userId||'—')}{td(l.event||l.action||'—')}{td((l.id||'').slice(0,12),true)}
+                </tr>
+              ))}/>
+            </FbCard>
+          )}
+
+          {/* NFTs */}
+          {tab==='nfts' && (
+            <FbCard title={`NFTs (${Array.isArray(tabData)?tabData.length:0})`}>
+              <FbTable empty="No NFTs found." headers={['Token ID','Name','Collection','Standard','Blockchain']} rows={(Array.isArray(tabData)?tabData:[]).map(n=>(
+                <tr key={n.id} style={{ borderBottom:`1px solid ${C.border}` }}>
+                  {td((n.id||'').slice(0,14),true)}{td(n.name||'—')}{td(n.collection?.name||'—')}{td(n.standard||'—')}{td(n.blockchainDescriptor||'—')}
+                </tr>
+              ))}/>
+            </FbCard>
+          )}
+
+          {/* EARN */}
+          {tab==='earn' && (
+            <FbCard title={`Earn / Yield Opportunities (${Array.isArray(tabData)?tabData.length:0})`}>
+              <FbTable empty="No earn opportunities." headers={['ID','Asset','APY','Provider','Type']} rows={(Array.isArray(tabData)?tabData:[]).map((e,i)=>(
+                <tr key={e.id||i} style={{ borderBottom:`1px solid ${C.border}` }}>
+                  {td((e.id||'').slice(0,12),true)}{td(e.assetId||e.asset||'—')}
+                  {td(e.apy!=null?`${(e.apy*100).toFixed(2)}%`:'—')}{td(e.providerId||e.provider||'—')}{td(e.type||'—')}
+                </tr>
+              ))}/>
+            </FbCard>
+          )}
+
+          {/* SMART CONTRACTS */}
+          {tab==='contracts' && (
+            <FbCard title={`Deployed Contracts (${Array.isArray(tabData)?tabData.length:0})`}>
+              <FbTable empty="No deployed contracts." headers={['Address','Name','Chain','Status']} rows={(Array.isArray(tabData)?tabData:[]).map((c,i)=>(
+                <tr key={c.id||c.contractAddress||i} style={{ borderBottom:`1px solid ${C.border}` }}>
+                  {td((c.contractAddress||'').slice(0,14)+'…',true)}{td(c.name||c.contractName||'—')}{td(c.assetId||c.blockchain||'—')}
+                  <td style={{ padding:'10px 16px' }}><Badge color={c.status==='COMPLETED'?'green':'gray'}>{c.status||'—'}</Badge></td>
+                </tr>
+              ))}/>
+            </FbCard>
+          )}
+
+          {/* WORKSPACE USERS */}
+          {tab==='workspace' && (
+            <FbCard title="Workspace Console Users">
+              <FbTable empty="No workspace users." headers={['ID','Name','Email','Role','Status']} rows={(Array.isArray(tabData)?tabData:[]).map(u=>(
+                <tr key={u.id} style={{ borderBottom:`1px solid ${C.border}` }}>
+                  {td((u.id||'').slice(0,12),true)}{td(`${u.firstName||''} ${u.lastName||''}`.trim()||'—')}{td(u.email||'—')}{td(u.role||'—')}
+                  <td style={{ padding:'10px 16px' }}><Badge color={u.enabled?'green':'gray'}>{u.enabled?'Active':'Disabled'}</Badge></td>
+                </tr>
+              ))}/>
+            </FbCard>
+          )}
+
+          {/* COSIGNERS */}
+          {tab==='cosigners' && (
+            <FbCard title={`Cosigners (${Array.isArray(tabData)?tabData.length:0})`}>
+              <FbTable empty="No cosigners." headers={['ID','Name','Version','Paired']} rows={(Array.isArray(tabData)?tabData:[]).map(c=>(
+                <tr key={c.cosignerId||c.id} style={{ borderBottom:`1px solid ${C.border}` }}>
+                  {td((c.cosignerId||c.id||'').slice(0,12),true)}{td(c.name||'—')}{td(c.version||'—')}
+                  <td style={{ padding:'10px 16px' }}><Badge color={c.paired?'green':'gray'}>{c.paired?'Paired':'Unpaired'}</Badge></td>
+                </tr>
+              ))}/>
+            </FbCard>
+          )}
+
+          {/* OFF-EXCHANGE */}
+          {tab==='off-exchange' && (
+            <FbCard title="Off-Exchange Collateral Accounts">
+              <div style={{ padding:'12px 20px' }}>
+                <div style={{ fontSize:12, color:C.muted, marginBottom:12 }}>
+                  Query by passing <code style={{ background:C.card2, padding:'2px 6px', borderRadius:4 }}>?mainExchangeAccountId=ID</code> in the URL.
+                </div>
+              </div>
+              <FbTable empty="No off-exchange data. Provide mainExchangeAccountId query param." headers={['ID','Type','Balance','Currency']} rows={(Array.isArray(tabData)?tabData:[]).map((o,i)=>(
+                <tr key={o.id||i} style={{ borderBottom:`1px solid ${C.border}` }}>
+                  {td(o.id||'—',true)}{td(o.type||'—')}{td(o.balance||'—')}{td(o.currency||o.assetId||'—')}
+                </tr>
+              ))}/>
+            </FbCard>
+          )}
+
+          {/* NETWORK */}
+          {tab==='network' && (
+            <FbCard title={`Network Connections (${Array.isArray(tabData)?tabData.length:0})`}>
+              <FbTable empty="No network connections." headers={['ID','Name','Status','Direction']} rows={(Array.isArray(tabData)?tabData:[]).map(n=>(
+                <tr key={n.localChannel?.id||n.id} style={{ borderBottom:`1px solid ${C.border}` }}>
+                  {td((n.localChannel?.id||n.id||'').slice(0,12)+'…',true)}{td(n.localChannel?.name||n.name||'—')}
+                  <td style={{ padding:'10px 16px' }}><Badge color={n.status==='CONNECTED'?'green':'gray'}>{n.status||'Unknown'}</Badge></td>
+                  {td(n.direction||'—')}
+                </tr>
+              ))}/>
+            </FbCard>
           )}
         </>
       )}
