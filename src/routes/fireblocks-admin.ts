@@ -198,12 +198,178 @@ router.get('/network', async (_req, res) => { if (!guard(res)) return; await wra
 router.get('/network/:id', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.network.get(req.params.id)); });
 router.get('/network-ids', async (_req, res) => { if (!guard(res)) return; await wrap(res, () => fb.network.getNetworkIds()); });
 
-// ── Webhooks ──────────────────────────────────────────────────────────────────
+// ── Webhooks V1 ───────────────────────────────────────────────────────────────
 router.post('/webhooks/resend', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.webhooks.resend(req.body.txId)); });
+
+// ── Webhooks V2 ───────────────────────────────────────────────────────────────
+router.get('/webhooks-v2', async (_req, res) => { if (!guard(res)) return; await wrap(res, () => fb.webhooksV2.list()); });
+router.post('/webhooks-v2', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.webhooksV2.create(req.body)); });
+router.get('/webhooks-v2/metrics', async (_req, res) => { if (!guard(res)) return; await wrap(res, () => fb.webhooksV2.getMetrics()); });
+router.get('/webhooks-v2/:id', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.webhooksV2.get(req.params.id)); });
+router.put('/webhooks-v2/:id', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.webhooksV2.update(req.params.id, req.body)); });
+router.delete('/webhooks-v2/:id', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.webhooksV2.delete(req.params.id)); });
+router.get('/webhooks-v2/:id/notifications', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.webhooksV2.getNotifications(req.params.id)); });
+router.post('/webhooks-v2/:id/resend-failed', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.webhooksV2.resendFailed(req.params.id)); });
+router.post('/webhooks-v2/:id/notifications/:nid/resend', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.webhooksV2.resendById(req.params.id, req.params.nid)); });
 
 // ── Assets ────────────────────────────────────────────────────────────────────
 router.get('/assets', async (_req, res) => { if (!guard(res)) return; await wrap(res, () => fb.assets.getSupportedAssets()); });
 router.get('/assets/:assetId', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.assets.getAsset(req.params.assetId)); });
 router.get('/blockchains', async (_req, res) => { if (!guard(res)) return; await wrap(res, () => fb.assets.listBlockchains()); });
+
+// ── Web3 Connections (WalletConnect) ──────────────────────────────────────────
+router.get('/web3', async (_req, res) => { if (!guard(res)) return; await wrap(res, () => fb.web3.list()); });
+router.post('/web3', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.web3.create(req.body.uri, req.body.vaultAccountId)); });
+router.delete('/web3/:id', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.web3.remove(req.params.id)); });
+router.post('/web3/:id/submit', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.web3.submit(req.params.id, req.body.approve)); });
+
+// ── Travel Rule ───────────────────────────────────────────────────────────────
+router.get('/travel-rule/vasps', async (_req, res) => { if (!guard(res)) return; await wrap(res, () => fb.travelRule.getVASPs()); });
+router.get('/travel-rule/vasps/:did', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.travelRule.getVASP(req.params.did)); });
+router.put('/travel-rule/vasps', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.travelRule.updateVASP(req.body)); });
+router.post('/travel-rule/validate', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.travelRule.validateTransaction(req.body)); });
+router.get('/travel-rule/vaults/:vaultId/vasp', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.travelRule.getVaspForVault(req.params.vaultId)); });
+router.post('/travel-rule/vaults/:vaultId/vasp', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.travelRule.setVaspForVault(req.params.vaultId, req.body.vaspDid)); });
+router.post('/travel-rule/proof-of-address', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.travelRule.createProofOfAddress(req.body)); });
+router.get('/travel-rule/proof-of-address/:address', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.travelRule.getProofOfAddress(req.params.address)); });
+
+// ── Tokenization ──────────────────────────────────────────────────────────────
+router.get('/tokenization/collections', async (_req, res) => { if (!guard(res)) return; await wrap(res, () => fb.tokenization.listCollections()); });
+router.post('/tokenization/collections', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.tokenization.createCollection(req.body)); });
+router.get('/tokenization/collections/:id', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.tokenization.getCollection(req.params.id)); });
+router.post('/tokenization/collections/:id/mint', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.tokenization.mintToken(req.params.id, req.body)); });
+router.post('/tokenization/collections/:id/burn', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.tokenization.burnToken(req.params.id, req.body)); });
+router.get('/tokenization/collections/:id/tokens/:tokenId', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.tokenization.getTokenDetails(req.params.id, req.params.tokenId)); });
+router.post('/tokenization/issue', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.tokenization.issueToken(req.body)); });
+router.post('/tokenization/issue-multichain', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.tokenization.issueMultiChain(req.body)); });
+router.get('/tokenization/linked', async (_req, res) => { if (!guard(res)) return; await wrap(res, () => fb.tokenization.listLinkedTokens()); });
+router.get('/tokenization/linked/:id', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.tokenization.getLinkedToken(req.params.id)); });
+router.post('/tokenization/link', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.tokenization.link(req.body)); });
+router.delete('/tokenization/link/:id', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.tokenization.unlink(req.params.id)); });
+router.post('/tokenization/deployable-address', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.tokenization.getDeployableAddress(req.body)); });
+
+// ── Smart Transfer ────────────────────────────────────────────────────────────
+router.get('/smart-transfer', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.smartTransfer.list(req.query)); });
+router.post('/smart-transfer', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.smartTransfer.create(req.body)); });
+router.get('/smart-transfer/statistics', async (_req, res) => { if (!guard(res)) return; await wrap(res, () => fb.smartTransfer.getStatistics()); });
+router.get('/smart-transfer/user-groups', async (_req, res) => { if (!guard(res)) return; await wrap(res, () => fb.smartTransfer.getUserGroups()); });
+router.post('/smart-transfer/user-groups', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.smartTransfer.setUserGroups(req.body)); });
+router.get('/smart-transfer/:id', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.smartTransfer.get(req.params.id)); });
+router.post('/smart-transfer/:id/submit', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.smartTransfer.submit(req.params.id)); });
+router.post('/smart-transfer/:id/cancel', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.smartTransfer.cancel(req.params.id)); });
+router.post('/smart-transfer/:id/fulfill', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.smartTransfer.fulfill(req.params.id)); });
+router.patch('/smart-transfer/:id/expiration', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.smartTransfer.setExpiration(req.params.id, req.body.expiresAt)); });
+router.post('/smart-transfer/:id/terms', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.smartTransfer.createTerm(req.params.id, req.body)); });
+router.get('/smart-transfer/:id/terms/:termId', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.smartTransfer.getTerm(req.params.id, req.params.termId)); });
+router.put('/smart-transfer/:id/terms/:termId', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.smartTransfer.updateTerm(req.params.id, req.params.termId, req.body)); });
+router.delete('/smart-transfer/:id/terms/:termId', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.smartTransfer.removeTerm(req.params.id, req.params.termId)); });
+router.post('/smart-transfer/:id/terms/:termId/fund', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.smartTransfer.fundTerm(req.params.id, req.params.termId)); });
+
+// ── Key Link (Signing / Validation Keys) ──────────────────────────────────────
+router.get('/key-link/signing-keys', async (_req, res) => { if (!guard(res)) return; await wrap(res, () => fb.keyLink.listSigningKeys()); });
+router.post('/key-link/signing-keys', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.keyLink.createSigningKey(req.body)); });
+router.get('/key-link/signing-keys/:id', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.keyLink.getSigningKey(req.params.id)); });
+router.put('/key-link/signing-keys/:id', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.keyLink.updateSigningKey(req.params.id, req.body)); });
+router.post('/key-link/signing-keys/:id/agent', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.keyLink.setAgentId(req.params.id, req.body.agentUserId)); });
+router.get('/key-link/validation-keys', async (_req, res) => { if (!guard(res)) return; await wrap(res, () => fb.keyLink.listValidationKeys()); });
+router.post('/key-link/validation-keys', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.keyLink.createValidationKey(req.body)); });
+router.get('/key-link/validation-keys/:id', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.keyLink.getValidationKey(req.params.id)); });
+router.patch('/key-link/validation-keys/:id/disable', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.keyLink.disableValidationKey(req.params.id, req.body)); });
+
+// ── Payments / Payout ─────────────────────────────────────────────────────────
+router.post('/payments/payout', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.payments.createPayout(req.body)); });
+router.get('/payments/payout/:id', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.payments.getPayout(req.params.id)); });
+router.post('/payments/payout/:id/action', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.payments.executeAction(req.params.id, req.body.action)); });
+
+// ── Tags ──────────────────────────────────────────────────────────────────────
+router.get('/tags', async (_req, res) => { if (!guard(res)) return; await wrap(res, () => fb.tags.list()); });
+router.post('/tags', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.tags.create(req.body.name)); });
+router.get('/tags/:id', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.tags.get(req.params.id)); });
+router.put('/tags/:id', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.tags.update(req.params.id, req.body.name)); });
+router.delete('/tags/:id', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.tags.delete(req.params.id)); });
+
+// ── User Groups ───────────────────────────────────────────────────────────────
+router.get('/user-groups', async (_req, res) => { if (!guard(res)) return; await wrap(res, () => fb.userGroups.list()); });
+router.post('/user-groups', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.userGroups.create(req.body)); });
+router.get('/user-groups/:id', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.userGroups.get(req.params.id)); });
+router.put('/user-groups/:id', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.userGroups.update(req.params.id, req.body)); });
+router.delete('/user-groups/:id', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.userGroups.delete(req.params.id)); });
+
+// ── Trading ───────────────────────────────────────────────────────────────────
+router.get('/trading/providers', async (_req, res) => { if (!guard(res)) return; await wrap(res, () => fb.trading.getProviders()); });
+router.get('/trading/providers/:id', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.trading.getProvider(req.params.id)); });
+router.post('/trading/orders', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.trading.createOrder(req.body)); });
+router.get('/trading/orders', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.trading.listOrders(req.query)); });
+router.get('/trading/orders/:id', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.trading.getOrder(req.params.id)); });
+router.post('/trading/quotes', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.trading.createQuote(req.body)); });
+
+// ── Connected Accounts ────────────────────────────────────────────────────────
+router.get('/connected-accounts', async (_req, res) => { if (!guard(res)) return; await wrap(res, () => fb.connectedAccounts.list()); });
+router.get('/connected-accounts/:id', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.connectedAccounts.get(req.params.id)); });
+router.patch('/connected-accounts/:id/rename', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.connectedAccounts.rename(req.params.id, req.body.name)); });
+router.get('/connected-accounts/:id/balances', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.connectedAccounts.getBalances(req.params.id)); });
+router.get('/connected-accounts/:id/rates', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.connectedAccounts.getRates(req.params.id)); });
+router.get('/connected-accounts/:id/trading-pairs', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.connectedAccounts.getTradingPairs(req.params.id)); });
+router.delete('/connected-accounts/:id', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.connectedAccounts.disconnect(req.params.id)); });
+
+// ── On-Chain Data ─────────────────────────────────────────────────────────────
+router.get('/onchain/balances/:contractAddress/:assetId', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.onchainData.getContractBalances(req.params.contractAddress, req.params.assetId)); });
+router.get('/onchain/supply/:contractAddress/:assetId', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.onchainData.getContractSupply(req.params.contractAddress, req.params.assetId)); });
+
+// ── UTXO Management ───────────────────────────────────────────────────────────
+router.get('/utxo', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.utxo.list(req.query)); });
+router.patch('/utxo/labels', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.utxo.updateLabels(req.body)); });
+
+// ── Whitelisted Contracts ─────────────────────────────────────────────────────
+router.get('/whitelisted-contracts', async (_req, res) => { if (!guard(res)) return; await wrap(res, () => fb.whitelistedContracts.list()); });
+router.post('/whitelisted-contracts', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.whitelistedContracts.create(req.body)); });
+router.get('/whitelisted-contracts/:id', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.whitelistedContracts.get(req.params.id)); });
+router.delete('/whitelisted-contracts/:id', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.whitelistedContracts.delete(req.params.id)); });
+router.post('/whitelisted-contracts/:id/assets/:assetId', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.whitelistedContracts.addAsset(req.params.id, req.params.assetId, req.body)); });
+router.get('/whitelisted-contracts/:id/assets/:assetId', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.whitelistedContracts.getAsset(req.params.id, req.params.assetId)); });
+router.delete('/whitelisted-contracts/:id/assets/:assetId', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.whitelistedContracts.deleteAsset(req.params.id, req.params.assetId)); });
+
+// ── MPC Keys ──────────────────────────────────────────────────────────────────
+router.get('/mpc-keys', async (_req, res) => { if (!guard(res)) return; await wrap(res, () => fb.mpcKeys.list()); });
+router.get('/mpc-keys/user/:userId', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.mpcKeys.listByUser(req.params.userId)); });
+
+// ── Workspace ─────────────────────────────────────────────────────────────────
+router.get('/workspace', async (_req, res) => { if (!guard(res)) return; await wrap(res, () => fb.workspace.get()); });
+router.get('/workspace/status', async (_req, res) => { if (!guard(res)) return; await wrap(res, () => fb.workspace.getStatus()); });
+router.get('/workspace/users', async (_req, res) => { if (!guard(res)) return; await wrap(res, () => fb.workspace.getUsers()); });
+router.get('/workspace/ip-whitelist', async (_req, res) => { if (!guard(res)) return; await wrap(res, () => fb.workspace.getWhitelistIps()); });
+
+// ── Device Management (OTA / Reset) ───────────────────────────────────────────
+router.get('/ncw/:walletId/ota', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.deviceMgmt.getOtaStatus(req.params.walletId)); });
+router.put('/ncw/:walletId/ota', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.deviceMgmt.setOtaStatus(req.params.walletId, req.body.enabled)); });
+router.post('/ncw/:walletId/devices/:deviceId/reset', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.deviceMgmt.resetDevice(req.params.walletId, req.params.deviceId)); });
+
+// ── TR-Link ───────────────────────────────────────────────────────────────────
+router.get('/tr-link/partners', async (_req, res) => { if (!guard(res)) return; await wrap(res, () => fb.trLink.getPartners()); });
+router.get('/tr-link/policy', async (_req, res) => { if (!guard(res)) return; await wrap(res, () => fb.trLink.getPolicy()); });
+router.get('/tr-link/integrations', async (_req, res) => { if (!guard(res)) return; await wrap(res, () => fb.trLink.listIntegrations()); });
+router.post('/tr-link/integrations', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.trLink.createIntegration(req.body)); });
+router.post('/tr-link/integrations/:id/connect', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.trLink.connectIntegration(req.params.id, req.body)); });
+router.post('/tr-link/integrations/:id/disconnect', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.trLink.disconnectIntegration(req.params.id)); });
+router.post('/tr-link/integrations/:id/test', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.trLink.testConnection(req.params.id)); });
+router.get('/tr-link/integrations/:id/public-key', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.trLink.getPublicKey(req.params.id)); });
+router.get('/tr-link/customers', async (_req, res) => { if (!guard(res)) return; await wrap(res, () => fb.trLink.listCustomers()); });
+router.post('/tr-link/customers', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.trLink.createCustomer(req.body)); });
+router.get('/tr-link/customers/:id', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.trLink.getCustomer(req.params.id)); });
+router.put('/tr-link/customers/:id', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.trLink.updateCustomer(req.params.id, req.body)); });
+router.delete('/tr-link/customers/:id', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.trLink.deleteCustomer(req.params.id)); });
+router.get('/tr-link/vasps', async (_req, res) => { if (!guard(res)) return; await wrap(res, () => fb.trLink.listVasps()); });
+router.get('/tr-link/assets', async (_req, res) => { if (!guard(res)) return; await wrap(res, () => fb.trLink.listSupportedAssets()); });
+router.post('/tr-link/assess', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.trLink.assessRequirement(req.body)); });
+router.post('/tr-link/trm', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.trLink.createTrm(req.body)); });
+router.get('/tr-link/trm/:id', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.trLink.getTrm(req.params.id)); });
+router.post('/tr-link/trm/:id/cancel', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.trLink.cancelTrm(req.params.id)); });
+
+// ── Legacy Policy (V1) ────────────────────────────────────────────────────────
+router.get('/policy-legacy/active', async (_req, res) => { if (!guard(res)) return; await wrap(res, () => fb.policyLegacy.getActive()); });
+router.get('/policy-legacy/draft', async (_req, res) => { if (!guard(res)) return; await wrap(res, () => fb.policyLegacy.getDraft()); });
+router.put('/policy-legacy/draft', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.policyLegacy.updateDraft(req.body)); });
+router.post('/policy-legacy/publish', async (_req, res) => { if (!guard(res)) return; await wrap(res, () => fb.policyLegacy.publishDraft()); });
+router.post('/policy-legacy/rules', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.policyLegacy.publishRules(req.body)); });
 
 export default router;
