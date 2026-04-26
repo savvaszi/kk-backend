@@ -55,6 +55,8 @@ router.post('/vaults/:id/assets/:assetId/refresh', async (req, res) => { if (!gu
 router.get('/vaults/:id/assets/:assetId/addresses', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.vaults.getAddresses(req.params.id, req.params.assetId)); });
 router.post('/vaults/:id/assets/:assetId/addresses', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.vaults.createAddress(req.params.id, req.params.assetId, req.body.description)); });
 router.get('/vaults/:id/assets/:assetId/max-spendable', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.vaults.getMaxSpendable(req.params.id, req.params.assetId)); });
+router.get('/vaults/:id/assets/:assetId/unspent-inputs', async (req, res) => { if (!guard(res)) return; await wrap(res, () => fb.vaults.getUnspentInputs(req.params.id, req.params.assetId)); });
+router.get('/vaults/assets', async (_req, res) => { if (!guard(res)) return; await wrap(res, () => fb.vaults.getAllAssets()); });
 
 // ── Transactions ──────────────────────────────────────────────────────────────
 router.get('/transactions', async (req, res) => {

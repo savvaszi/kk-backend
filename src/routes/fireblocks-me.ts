@@ -106,6 +106,13 @@ router.get('/vault/assets/:assetId/max-spendable', async (req: AuthRequest, res)
   await wrap(res, () => fb.vaults.getMaxSpendable(vaultId, req.params.assetId));
 });
 
+router.get('/vault/assets/:assetId/unspent-inputs', async (req: AuthRequest, res) => {
+  if (!guard(res)) return;
+  const vaultId = await getUserVaultId(req);
+  if (!vaultId) { res.json({ success: true, data: [] }); return; }
+  await wrap(res, () => fb.vaults.getUnspentInputs(vaultId, req.params.assetId));
+});
+
 // ── Transactions ──────────────────────────────────────────────────────────────
 router.get('/transactions', async (req: AuthRequest, res) => {
   if (!guard(res)) return;
