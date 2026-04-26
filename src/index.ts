@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { initDb } from './db/index.js';
@@ -23,14 +24,33 @@ const origins = process.env.ALLOWED_ORIGINS
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({ origin: origins, credentials: true }));
 app.use(express.json());
+
+// ── Rate Limiting ─────────────────────────────────────────────────────────────
+// Strict limit for auth endpoints (login, register, forgot-password, reset-password)
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'Too many requests, please try again later.' },
+});
+
+// Relaxed limit for general API usage
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'Too many requests, please try again later.' },
+});
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
 app.get('/', (_, res) => res.redirect('/login.html'));
 app.get('/health', (_, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
-app.use('/auth', authRouter);
-app.use('/me', meRouter);
-app.use('/me/fireblocks', fireblocksUserRouter);
+app.use('/auth', authLimiter, authRouter);
+app.use('/me', apiLimiter, meRouter);
+app.use('/me/fireblocks', apiLimiter, fireblocksUserRouter);
 app.use('/admin', adminRouter);
 app.use('/admin/fireblocks', fireblocksAdminRouter);
 
