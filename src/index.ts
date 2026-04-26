@@ -11,6 +11,7 @@ import meRouter from './routes/me.js';
 import adminRouter from './routes/admin.js';
 import fireblocksAdminRouter from './routes/fireblocks-admin.js';
 import fireblocksUserRouter from './routes/fireblocks-me.js';
+import publicRouter from './routes/public.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -48,6 +49,7 @@ app.use(express.static(path.join(__dirname, '..', 'public')));
 app.get('/', (_, res) => res.redirect('/login.html'));
 app.get('/health', (_, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
+app.use('/public', publicRouter);
 app.use('/auth', authLimiter, authRouter);
 app.use('/me', apiLimiter, meRouter);
 app.use('/me/fireblocks', apiLimiter, fireblocksUserRouter);
