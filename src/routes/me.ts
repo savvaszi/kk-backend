@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import type { Response } from 'express';
 import { db } from '../db/index.js';
-import { users, userSessions, apiKeys, wallets } from '../db/schema.js';
+import { users, userSessions, apiKeys, wallets, auditLogs } from '../db/schema.js';
 import { eq, and, gt, desc } from 'drizzle-orm';
 import { requireAuth, type AuthRequest } from '../middleware/auth.js';
 import { logAudit } from '../lib/audit.js';
@@ -217,6 +217,47 @@ router.get('/notifications', async (req: AuthRequest, res: Response) => {
     .select({ emailNotifications: users.emailNotifications, smsNotifications: users.smsNotifications, pushNotifications: users.pushNotifications })
     .from(users).where(eq(users.id, req.userId!)).limit(1);
   res.json({ success: true, data: user });
+});
+
+// GET /me/audit
+router.get('/audit', async (req: AuthRequest, res: Response) => {
+  const limit = Math.min(parseInt(req.query.limit as string ?? '25', 10), 100);
+  const logs = await db
+    .select()
+    .from(auditLogs)
+    .where(eq(auditLogs.userId, req.userId!))
+    .orderBy(desc(auditLogs.createdAt))
+    .limit(limit);
+  res.json({ success: true, data: logs });
+});
+
+// POST /me/security/change-password
+router.post('/security/change-password', async (req: AuthRequest, res: Response) => {
+  const { currentPassword, newPassword } = req.body;
+  if (!currentPassword || !newPassword) {
+    res.status(400).json({ success: false, error: 'currentPassword and newPassword are required' });
+    return;
+  }
+  if (newPassword.length < 8) {
+    res.status(400).json({ success: false, error: 'New password must be at least 8 characters' });
+    return;
+  }
+  const { verifyPassword, hashPassword } = await import('../lib/password.js');
+  const [user] = await db.select().from(users).where(eq(users.id, req.userId!)).limit(1);
+  if (!user) { res.status(404).json({ success: false, error: 'User not found' }); return; }
+  const valid = await verifyPassword(currentPassword, user.passwordHash);
+  if (!valid) { res.status(401).json({ success: false, error: 'Current password is incorrect' }); return; }
+  const newHash = await hashPassword(newPassword);
+  await db.update(users).set({ passwordHash: newHash, updatedAt: new Date() }).where(eq(users.id, user.id));
+  // Revoke all other sessions for security
+  const allSessions = await db.select({ id: userSessions.id }).from(userSessions).where(eq(userSessions.userId, user.id));
+  for (const s of allSessions) {
+    if (s.id !== req.sessionId) {
+      await db.delete(userSessions).where(eq(userSessions.id, s.id));
+    }
+  }
+  await logAudit({ userId: req.userId, userName: user.email, action: 'Password Changed', detail: 'Password updated successfully', type: 'security', severity: 'success' });
+  res.json({ success: true });
 });
 
 // PATCH /me/notifications
