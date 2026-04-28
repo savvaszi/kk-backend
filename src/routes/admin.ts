@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import type { Response } from 'express';
 import { db } from '../db/index.js';
-import { users, userSessions, apiKeys, wallets, auditLogs, adminNotifications, platformSettings } from '../db/schema.js';
+import { users, userSessions, apiKeys, wallets, auditLogs, adminNotifications, platformSettings, fireblocksEvents } from '../db/schema.js';
 import { eq, desc, ilike, or, count, and, lt } from 'drizzle-orm';
 import { requireAuth, requireAdmin, type AuthRequest } from '../middleware/auth.js';
 import { logAudit } from '../lib/audit.js';
@@ -233,6 +233,16 @@ router.patch('/settings', async (req: AuthRequest, res: Response) => {
       .onConflictDoUpdate({ target: platformSettings.key, set: { value, updatedAt: new Date() } });
   }
   res.json({ success: true });
+});
+
+// GET /admin/fireblocks-events — paginated webhook event log
+router.get('/fireblocks-events', async (req: AuthRequest, res: Response) => {
+  const { direction, eventType, limit = '100' } = req.query as Record<string, string>;
+  let query = db.select().from(fireblocksEvents).$dynamic();
+  if (direction && direction !== 'all') query = query.where(eq(fireblocksEvents.direction, direction));
+  if (eventType && eventType !== 'all') query = query.where(eq(fireblocksEvents.eventType, eventType));
+  const rows = await query.orderBy(desc(fireblocksEvents.createdAt)).limit(Math.min(parseInt(limit), 1000));
+  res.json({ success: true, data: rows });
 });
 
 function safeUser(u: typeof users.$inferSelect) {

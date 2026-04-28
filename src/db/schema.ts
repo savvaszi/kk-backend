@@ -100,3 +100,32 @@ export const platformSettings = pgTable('platform_settings', {
   value: text('value').notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
+
+export const fireblocksEvents = pgTable('fireblocks_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  // Fireblocks-provided identifiers
+  fireblocksEventId: varchar('fireblocks_event_id', { length: 100 }),
+  txId: varchar('tx_id', { length: 100 }),
+  eventType: varchar('event_type', { length: 100 }).notNull(),
+  // Transaction details (populated for TRANSACTION_* events)
+  txStatus: varchar('tx_status', { length: 50 }),
+  assetId: varchar('asset_id', { length: 50 }),
+  amount: varchar('amount', { length: 50 }),
+  netAmount: varchar('net_amount', { length: 50 }),
+  fee: varchar('fee', { length: 50 }),
+  sourceType: varchar('source_type', { length: 50 }),
+  sourceId: varchar('source_id', { length: 100 }),
+  destinationType: varchar('destination_type', { length: 50 }),
+  destinationId: varchar('destination_id', { length: 100 }),
+  destinationAddress: varchar('destination_address', { length: 255 }),
+  // Linked entities
+  vaultId: varchar('vault_id', { length: 100 }),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+  // Direction: 'deposit' | 'withdrawal' | 'internal' | 'unknown'
+  direction: varchar('direction', { length: 20 }),
+  // Verification
+  signatureValid: boolean('signature_valid').default(false).notNull(),
+  // Full raw payload for audit trail (DORA Art. 17 requirement)
+  rawPayload: jsonb('raw_payload'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});

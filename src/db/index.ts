@@ -120,6 +120,31 @@ export async function initDb() {
     )
   `;
 
+  await sql`
+    CREATE TABLE IF NOT EXISTS fireblocks_events (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      fireblocks_event_id VARCHAR(100),
+      tx_id VARCHAR(100),
+      event_type VARCHAR(100) NOT NULL,
+      tx_status VARCHAR(50),
+      asset_id VARCHAR(50),
+      amount VARCHAR(50),
+      net_amount VARCHAR(50),
+      fee VARCHAR(50),
+      source_type VARCHAR(50),
+      source_id VARCHAR(100),
+      destination_type VARCHAR(50),
+      destination_id VARCHAR(100),
+      destination_address VARCHAR(255),
+      vault_id VARCHAR(100),
+      user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+      direction VARCHAR(20),
+      signature_valid BOOLEAN DEFAULT FALSE NOT NULL,
+      raw_payload JSONB,
+      created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+    )
+  `;
+
   // Safe column migrations
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS fireblocks_vault_id VARCHAR(100)`;
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_token VARCHAR(255)`;

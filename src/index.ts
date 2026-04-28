@@ -12,6 +12,7 @@ import adminRouter from './routes/admin.js';
 import fireblocksAdminRouter from './routes/fireblocks-admin.js';
 import fireblocksUserRouter from './routes/fireblocks-me.js';
 import publicRouter from './routes/public.js';
+import fireblocksWebhookRouter from './routes/webhook-fireblocks.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -24,6 +25,12 @@ const origins = process.env.ALLOWED_ORIGINS
 
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({ origin: origins, credentials: true }));
+
+// ── Fireblocks Webhook ────────────────────────────────────────────────────────
+// Must be mounted BEFORE express.json() so the route handler can read the raw
+// body bytes needed for RSA-SHA512 signature verification.
+app.use('/webhooks/fireblocks', fireblocksWebhookRouter);
+
 app.use(express.json());
 
 // ── Rate Limiting ─────────────────────────────────────────────────────────────
@@ -55,21 +62,6 @@ app.use('/me', apiLimiter, meRouter);
 app.use('/me/fireblocks', apiLimiter, fireblocksUserRouter);
 app.use('/admin', adminRouter);
 app.use('/admin/fireblocks', fireblocksAdminRouter);
-
-// Fireblocks webhook receiver
-app.post('/webhooks/fireblocks', async (req, res) => {
-  const { logAudit } = await import('./lib/audit.js');
-  const event = req.body;
-  const type = event?.type ?? 'UNKNOWN';
-  const txId = event?.data?.id ?? event?.data?.txId ?? '';
-  await logAudit({
-    action: `Fireblocks Webhook: ${type}`,
-    detail: txId ? `Transaction ${txId}` : JSON.stringify(event).slice(0, 200),
-    type: 'webhook',
-    severity: 'info',
-  }).catch(() => {});
-  res.json({ success: true });
-});
 
 app.use((_, res) => res.status(404).json({ success: false, error: 'Not found' }));
 
