@@ -153,7 +153,7 @@ export async function initDb() {
     await sql`
       INSERT INTO users (email, username, password_hash, first_name, status, is_admin, email_verified, security_score)
       VALUES (${adminEmail}, 'admin', ${hash}, 'Admin', 'active', TRUE, TRUE, 100)
-      ON CONFLICT (email) DO UPDATE SET status = 'active', is_admin = TRUE, updated_at = NOW()
+      ON CONFLICT (email) DO NOTHING
     `;
   }
 
