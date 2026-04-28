@@ -6,7 +6,8 @@ let _sdk: Fireblocks | null = null;
 export function getFireblocks(): Fireblocks {
   if (_sdk) return _sdk;
   const apiKey = process.env.FIREBLOCKS_API_KEY;
-  const secretKey = process.env.FIREBLOCKS_SECRET_KEY;
+  // Env vars stored with literal \n — unescape to real newlines for PEM parsing
+  const secretKey = (process.env.FIREBLOCKS_SECRET_KEY || '').replace(/\\n/g, '\n');
   if (!apiKey || !secretKey) throw new Error('Fireblocks credentials not configured.');
   _sdk = new Fireblocks({
     apiKey,
