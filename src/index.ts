@@ -13,6 +13,8 @@ import fireblocksAdminRouter from './routes/fireblocks-admin.js';
 import fireblocksUserRouter from './routes/fireblocks-me.js';
 import publicRouter from './routes/public.js';
 import fireblocksWebhookRouter from './routes/webhook-fireblocks.js';
+import sumsubWebhookRouter from './routes/webhook-sumsub.js';
+import kycRouter from './routes/kyc.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -26,10 +28,11 @@ const origins = process.env.ALLOWED_ORIGINS
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({ origin: origins, credentials: true }));
 
-// ── Fireblocks Webhook ────────────────────────────────────────────────────────
-// Must be mounted BEFORE express.json() so the route handler can read the raw
-// body bytes needed for RSA-SHA512 signature verification.
+// ── Webhooks (raw body — MUST be before express.json()) ──────────────────────
+// Fireblocks: RSA-SHA512 signature over raw body (fireblocks-signature header)
 app.use('/webhooks/fireblocks', fireblocksWebhookRouter);
+// Sumsub: HMAC-SHA256 signature over raw body (x-payload-digest header)
+app.use('/webhooks/sumsub', sumsubWebhookRouter);
 
 app.use(express.json());
 
@@ -59,6 +62,7 @@ app.get('/health', (_, res) => res.json({ status: 'ok', timestamp: new Date().to
 app.use('/public', publicRouter);
 app.use('/auth', authLimiter, authRouter);
 app.use('/me', apiLimiter, meRouter);
+app.use('/me/kyc', apiLimiter, kycRouter);
 app.use('/me/fireblocks', apiLimiter, fireblocksUserRouter);
 app.use('/admin', adminRouter);
 app.use('/admin/fireblocks', fireblocksAdminRouter);

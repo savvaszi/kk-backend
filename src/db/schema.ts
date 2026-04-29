@@ -30,6 +30,11 @@ export const users = pgTable('users', {
   pushNotifications: boolean('push_notifications').default(false).notNull(),
   isAdmin: boolean('is_admin').default(false).notNull(),
   fireblocksVaultId: varchar('fireblocks_vault_id', { length: 100 }),
+  // KYC / Sumsub
+  sumsubApplicantId: varchar('sumsub_applicant_id', { length: 100 }),
+  kycStatus: varchar('kyc_status', { length: 20 }).default('none').notNull(),  // none | pending | approved | rejected
+  kycLevel: varchar('kyc_level', { length: 100 }),
+  kycReviewedAt: timestamp('kyc_reviewed_at', { withTimezone: true }),
   passwordResetToken: varchar('password_reset_token', { length: 255 }),
   passwordResetExpiresAt: timestamp('password_reset_expires_at', { withTimezone: true }),
   twoFaBackupCodes: jsonb('two_fa_backup_codes').$type<string[]>(),

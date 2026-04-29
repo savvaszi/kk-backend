@@ -147,6 +147,10 @@ export async function initDb() {
 
   // Safe column migrations
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS fireblocks_vault_id VARCHAR(100)`;
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS sumsub_applicant_id VARCHAR(100)`;
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS kyc_status VARCHAR(20) DEFAULT 'none' NOT NULL`;
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS kyc_level VARCHAR(100)`;
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS kyc_reviewed_at TIMESTAMPTZ`;
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_token VARCHAR(255)`;
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_expires_at TIMESTAMPTZ`;
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS two_fa_backup_codes JSONB`;
