@@ -9,10 +9,20 @@
 <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: #0a0b0e; color: #e8eaf0; font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; overflow: hidden; }
+  :root {
+    --adm-bg: #0a0b0e; --adm-sidebar: #0e1015; --adm-card: #13161d; --adm-card2: #181c25;
+    --adm-border: #1e2230; --adm-border2: #252a38; --adm-text: #e8eaf0; --adm-muted: #7a8099;
+    --adm-scroll-track: #111318; --adm-scroll-thumb: #2a2d36;
+  }
+  :root.light {
+    --adm-bg: #f5f7fa; --adm-sidebar: #ffffff; --adm-card: #ffffff; --adm-card2: #f8fafc;
+    --adm-border: #e2e8f0; --adm-border2: #cbd5e1; --adm-text: #1a202c; --adm-muted: #718096;
+    --adm-scroll-track: #e8edf3; --adm-scroll-thumb: #c0ccda;
+  }
+  body { background: var(--adm-bg); color: var(--adm-text); font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; overflow: hidden; }
   ::-webkit-scrollbar { width: 5px; height: 5px; }
-  ::-webkit-scrollbar-track { background: #111318; }
-  ::-webkit-scrollbar-thumb { background: #2a2d36; border-radius: 4px; }
+  ::-webkit-scrollbar-track { background: var(--adm-scroll-track); }
+  ::-webkit-scrollbar-thumb { background: var(--adm-scroll-thumb); border-radius: 4px; }
   ::-webkit-scrollbar-thumb:hover { background: #00e676; }
 </style>
 </head>
@@ -57,10 +67,10 @@ function displayName(u) {
 
 // ── Colors ────────────────────────────────────────────────────
 const C = {
-  bg:'#0a0b0e', sidebar:'#0e1015', card:'#13161d', card2:'#181c25',
-  border:'#1e2230', border2:'#252a38',
+  bg:'var(--adm-bg)', sidebar:'var(--adm-sidebar)', card:'var(--adm-card)', card2:'var(--adm-card2)',
+  border:'var(--adm-border)', border2:'var(--adm-border2)',
   orange:'#00e676', orangeD:'#00b359', orangeBg:'rgba(0,230,118,0.10)',
-  text:'#e8eaf0', muted:'#7a8099',
+  text:'var(--adm-text)', muted:'var(--adm-muted)',
   green:'#22c55e', greenBg:'rgba(34,197,94,0.12)',
   red:'#ef4444', redBg:'rgba(239,68,68,0.12)',
   yellow:'#eab308', yellowBg:'rgba(234,179,8,0.12)',
@@ -104,6 +114,8 @@ const Icons = {
   send:'M22 2L11 13 M22 2l-7 20-4-9-9-4 20-7',
   arrowDown:'M12 5v14 M5 12l7 7 7-7',
   network:'M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v4m0 0H5m4 0h10M9 7v10m0 0H5a2 2 0 01-2-2v-4m6 6h10a2 2 0 002-2v-4m0 0h-6',
+  sun:'M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364-.707.707M6.343 17.657l-.707.707M17.657 17.657l.707.707M6.343 6.343l-.707-.707M12 7a5 5 0 100 10 5 5 0 000-10z',
+  moon:'M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z',
 };
 
 // ── Shared UI ─────────────────────────────────────────────────
@@ -1045,6 +1057,17 @@ const NAV = [
 
 const Sidebar = ({ active, setActive, notifications }) => {
   const unread = notifications.filter(n=>!n.isRead).length;
+  const [dark, setDark] = useState(() => {
+    const saved = localStorage.getItem('kk_admin_theme');
+    if (saved === 'light') { document.documentElement.classList.add('light'); return false; }
+    return true;
+  });
+  const toggleTheme = () => {
+    const newDark = !dark;
+    setDark(newDark);
+    document.documentElement.classList.toggle('light', !newDark);
+    localStorage.setItem('kk_admin_theme', newDark ? 'dark' : 'light');
+  };
   return (
     <div style={{ width:220, background:C.sidebar, borderRight:`1px solid ${C.border}`, display:'flex', flexDirection:'column', height:'100vh', flexShrink:0 }}>
       <div style={{ padding:'22px 20px 18px', borderBottom:`1px solid ${C.border}` }}>
@@ -1073,6 +1096,12 @@ const Sidebar = ({ active, setActive, notifications }) => {
         })}
       </nav>
       <div style={{ padding:'14px 10px', borderTop:`1px solid ${C.border}` }}>
+        <button onClick={toggleTheme} style={{ width:'100%', display:'flex', alignItems:'center', gap:12, padding:'10px 12px', borderRadius:9, cursor:'pointer', border:'none', background:'transparent', color:C.muted, fontSize:13, fontWeight:600, marginBottom:3 }}
+          onMouseEnter={e=>e.currentTarget.style.background=C.border}
+          onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+          <Icon d={dark ? Icons.sun : Icons.moon} size={16} color={C.muted} stroke/>
+          {dark ? 'Light Mode' : 'Dark Mode'}
+        </button>
         <button onClick={logout} style={{ width:'100%', display:'flex', alignItems:'center', gap:12, padding:'10px 12px', borderRadius:9, cursor:'pointer', border:'none', background:'transparent', color:C.muted, fontSize:13, fontWeight:600 }}
           onMouseEnter={e=>e.currentTarget.style.background=C.border}
           onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
