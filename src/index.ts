@@ -15,6 +15,13 @@ import publicRouter from './routes/public.js';
 import fireblocksWebhookRouter from './routes/webhook-fireblocks.js';
 import sumsubWebhookRouter from './routes/webhook-sumsub.js';
 import kycRouter from './routes/kyc.js';
+import marketRouter from './routes/market.js';
+import portfolioRouter from './routes/portfolio.js';
+import transactionsRouter from './routes/transactions.js';
+import watchlistRouter from './routes/watchlist.js';
+import ordersRouter from './routes/orders.js';
+import swapsRouter from './routes/swaps.js';
+import transfersRouter from './routes/transfers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -60,10 +67,17 @@ app.get('/', (_, res) => res.redirect('/login.html'));
 app.get('/health', (_, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
 app.use('/public', publicRouter);
+app.use('/public/market', marketRouter);
 app.use('/auth', authLimiter, authRouter);
 app.use('/me', apiLimiter, meRouter);
 app.use('/me/kyc', apiLimiter, kycRouter);
 app.use('/me/fireblocks', apiLimiter, fireblocksUserRouter);
+app.use('/me/portfolio', apiLimiter, portfolioRouter);
+app.use('/me/transactions', apiLimiter, transactionsRouter);
+app.use('/me/watchlist', apiLimiter, watchlistRouter);
+app.use('/me/orders', apiLimiter, ordersRouter);
+app.use('/me/swaps', apiLimiter, swapsRouter);
+app.use('/me/transfers', apiLimiter, transfersRouter);
 app.use('/admin', adminRouter);
 app.use('/admin/fireblocks', fireblocksAdminRouter);
 

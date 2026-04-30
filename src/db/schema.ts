@@ -1,4 +1,4 @@
-import { pgTable, uuid, varchar, boolean, smallint, text, jsonb, timestamp } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, boolean, smallint, text, jsonb, timestamp, numeric } from 'drizzle-orm/pg-core';
 
 export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -103,6 +103,60 @@ export const adminNotifications = pgTable('admin_notifications', {
 export const platformSettings = pgTable('platform_settings', {
   key: varchar('key', { length: 100 }).primaryKey(),
   value: text('value').notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// ── Balances ──────────────────────────────────────────────────────────────────
+// One row per (user, asset). Updated atomically when transactions are processed.
+export const balances = pgTable('balances', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  asset: varchar('asset', { length: 20 }).notNull(),   // BTC | ETH | USDC …
+  amount: numeric('amount', { precision: 36, scale: 18 }).default('0').notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// ── Transactions ──────────────────────────────────────────────────────────────
+// Canonical ledger of every user-facing event (swap, send, receive, deposit, withdrawal).
+export const transactions = pgTable('transactions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  type: varchar('type', { length: 20 }).notNull(),     // swap | send | receive | deposit | withdrawal
+  fromAsset: varchar('from_asset', { length: 20 }),
+  toAsset: varchar('to_asset', { length: 20 }),
+  fromAmount: numeric('from_amount', { precision: 36, scale: 18 }),
+  toAmount: numeric('to_amount', { precision: 36, scale: 18 }),
+  fee: numeric('fee', { precision: 36, scale: 18 }),
+  feeAsset: varchar('fee_asset', { length: 20 }),
+  status: varchar('status', { length: 20 }).default('pending').notNull(), // pending | completed | failed
+  txHash: varchar('tx_hash', { length: 255 }),
+  address: varchar('address', { length: 255 }),       // destination for sends/withdrawals
+  note: text('note'),
+  metadata: jsonb('metadata'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// ── Watchlist ─────────────────────────────────────────────────────────────────
+export const watchlist = pgTable('watchlist', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  symbol: varchar('symbol', { length: 20 }).notNull(),
+  addedAt: timestamp('added_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// ── Orders ────────────────────────────────────────────────────────────────────
+export const orders = pgTable('orders', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  pair: varchar('pair', { length: 20 }).notNull(),     // e.g. ETH/USDT
+  side: varchar('side', { length: 10 }).notNull(),     // buy | sell
+  orderType: varchar('order_type', { length: 10 }).notNull(), // limit | market
+  price: numeric('price', { precision: 36, scale: 8 }),       // null for market orders
+  amount: numeric('amount', { precision: 36, scale: 18 }).notNull(),
+  filled: numeric('filled', { precision: 36, scale: 18 }).default('0').notNull(),
+  status: varchar('status', { length: 20 }).default('open').notNull(), // open | filled | cancelled | partial
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
 

@@ -145,6 +145,64 @@ export async function initDb() {
     )
   `;
 
+  await sql`
+    CREATE TABLE IF NOT EXISTS balances (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      asset VARCHAR(20) NOT NULL,
+      amount NUMERIC(36,18) DEFAULT 0 NOT NULL,
+      updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+      UNIQUE(user_id, asset)
+    )
+  `;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS transactions (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      type VARCHAR(20) NOT NULL,
+      from_asset VARCHAR(20),
+      to_asset VARCHAR(20),
+      from_amount NUMERIC(36,18),
+      to_amount NUMERIC(36,18),
+      fee NUMERIC(36,18),
+      fee_asset VARCHAR(20),
+      status VARCHAR(20) DEFAULT 'pending' NOT NULL,
+      tx_hash VARCHAR(255),
+      address VARCHAR(255),
+      note TEXT,
+      metadata JSONB,
+      created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+      updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+    )
+  `;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS watchlist (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      symbol VARCHAR(20) NOT NULL,
+      added_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+      UNIQUE(user_id, symbol)
+    )
+  `;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS orders (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      pair VARCHAR(20) NOT NULL,
+      side VARCHAR(10) NOT NULL,
+      order_type VARCHAR(10) NOT NULL,
+      price NUMERIC(36,8),
+      amount NUMERIC(36,18) NOT NULL,
+      filled NUMERIC(36,18) DEFAULT 0 NOT NULL,
+      status VARCHAR(20) DEFAULT 'open' NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+      updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+    )
+  `;
+
   // Safe column migrations
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS fireblocks_vault_id VARCHAR(100)`;
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS sumsub_applicant_id VARCHAR(100)`;
