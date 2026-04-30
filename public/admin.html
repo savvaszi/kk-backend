@@ -1112,14 +1112,87 @@ const Sidebar = ({ active, setActive, notifications }) => {
   );
 };
 
-const Topbar = ({ active, reload, loading }) => {
+const PROFILE_NAV = [
+  { id:'dashboard', label:'Overview',  icon:'dashboard'  },
+  { id:'security',  label:'Security',  icon:'security'   },
+  { id:'api',       label:'API Keys',  icon:'api'        },
+  { id:'notifs',    label:'Alerts',    icon:'bell'       },
+];
+
+const Topbar = ({ active, setActive, reload, loading }) => {
   const page = NAV.find(n=>n.id===active)||NAV[0];
+  const [open, setOpen] = useState(false);
+  const ref = React.useRef(null);
+
+  React.useEffect(() => {
+    const onDown = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, []);
+
   return (
-    <div style={{ height:56, background:C.sidebar, borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 28px', flexShrink:0 }}>
+    <div style={{ height:56, background:C.sidebar, borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 24px', flexShrink:0 }}>
+      {/* Breadcrumb */}
       <div style={{ display:'flex', alignItems:'center', gap:8, fontSize:13, color:C.muted }}>
-        <span style={{ color:C.orange }}>Admin</span><span>/</span><span style={{ color:C.text, fontWeight:600 }}>{page.label}</span>
+        <span style={{ color:C.orange }}>Admin</span>
+        <span>/</span>
+        <span style={{ color:C.text, fontWeight:600 }}>{page.label}</span>
       </div>
-      <button onClick={reload} disabled={loading} style={{ background:'none', border:'none', cursor:'pointer', color:C.muted, opacity:loading?.5:1 }}><Icon d={Icons.refresh} size={15} stroke/></button>
+
+      {/* Right controls */}
+      <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+        <button onClick={reload} disabled={loading} style={{ background:'none', border:'none', cursor:'pointer', color:C.muted, opacity:loading?.5:1, padding:4, borderRadius:6 }}>
+          <Icon d={Icons.refresh} size={15} stroke/>
+        </button>
+
+        {/* Profile dropdown */}
+        <div ref={ref} style={{ position:'relative' }}>
+          <button onClick={() => setOpen(o => !o)}
+            style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 10px', borderRadius:10, cursor:'pointer', border:`1px solid transparent`, background:'transparent', transition:'all .15s' }}
+            onMouseEnter={e => { e.currentTarget.style.background = C.border; e.currentTarget.style.borderColor = C.border2; }}
+            onMouseLeave={e => { if (!open) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent'; } }}>
+            <div style={{ width:30, height:30, borderRadius:'50%', background:C.orangeBg, border:`1px solid ${C.orange}40`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:12, fontWeight:700, color:C.orange, flexShrink:0 }}>A</div>
+            <span style={{ fontSize:13, fontWeight:600, color:C.text }}>Admin</span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={C.muted} strokeWidth="2"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+
+          {open && (
+            <div style={{ position:'absolute', right:0, top:'calc(100% + 6px)', width:200, background:C.card, border:`1px solid ${C.border}`, borderRadius:12, boxShadow:'0 8px 32px rgba(0,0,0,.3)', zIndex:100, overflow:'hidden' }}>
+              {/* Header */}
+              <div style={{ padding:'12px 16px', borderBottom:`1px solid ${C.border}`, fontSize:12, color:C.muted }}>
+                <div style={{ fontWeight:700, color:C.text, fontSize:13 }}>Administrator</div>
+                <div>admin@krypto-knight.com</div>
+              </div>
+              {/* Items */}
+              <div style={{ padding:'4px 0' }}>
+                {PROFILE_NAV.map(item => {
+                  const isActive = active === item.id;
+                  return (
+                    <button key={item.id} onClick={() => { setActive(item.id); setOpen(false); }}
+                      style={{ width:'100%', display:'flex', alignItems:'center', gap:12, padding:'10px 16px', border:'none', background:'transparent', cursor:'pointer', color: isActive ? C.orange : C.muted, fontSize:13, fontWeight:600, textAlign:'left', transition:'all .12s' }}
+                      onMouseEnter={e => { e.currentTarget.style.background = C.border; e.currentTarget.style.color = C.text; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = isActive ? C.orange : C.muted; }}>
+                      <Icon d={Icons[item.icon]} size={14} color="currentColor" stroke/>
+                      {item.label}
+                      {isActive && <div style={{ marginLeft:'auto', width:6, height:6, borderRadius:'50%', background:C.orange }}/>}
+                    </button>
+                  );
+                })}
+              </div>
+              {/* Sign out */}
+              <div style={{ borderTop:`1px solid ${C.border}`, padding:'4px 0' }}>
+                <button onClick={logout}
+                  style={{ width:'100%', display:'flex', alignItems:'center', gap:12, padding:'10px 16px', border:'none', background:'transparent', cursor:'pointer', color:C.muted, fontSize:13, fontWeight:600, textAlign:'left', transition:'all .12s' }}
+                  onMouseEnter={e => { e.currentTarget.style.background = C.redBg; e.currentTarget.style.color = C.red; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.muted; }}>
+                  <Icon d={Icons.logout} size={14} color="currentColor" stroke/>
+                  Sign Out
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 };
@@ -1178,7 +1251,7 @@ const App = () => {
     <div style={{ display:'flex', height:'100vh', overflow:'hidden' }}>
       <Sidebar active={active} setActive={setActive} notifications={notifications}/>
       <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
-        <Topbar active={active} reload={reload} loading={loading}/>
+        <Topbar active={active} setActive={setActive} reload={reload} loading={loading}/>
         <div style={{ flex:1, overflowY:'auto', background:C.bg }}>
           {loading ? <Loading/> : <Page/>}
         </div>
