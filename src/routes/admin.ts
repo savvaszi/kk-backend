@@ -6,6 +6,7 @@ import { eq, desc, ilike, or, count, and, lt } from 'drizzle-orm';
 import { requireAuth, requireAdmin, type AuthRequest } from '../middleware/auth.js';
 import { logAudit } from '../lib/audit.js';
 import { generateKeyId, generateRawKey, hashKey } from '../lib/apiKey.js';
+import bcrypt from 'bcrypt';
 
 const router = Router();
 router.use(requireAuth, requireAdmin);
@@ -71,6 +72,20 @@ router.patch('/users/:id', async (req: AuthRequest, res: Response) => {
   }
   const [user] = await db.update(users).set({ ...updates, updatedAt: new Date() }).where(eq(users.id, req.params.id)).returning();
   res.json({ success: true, data: safeUser(user) });
+});
+
+// POST /admin/users/:id/reset-password
+router.post('/users/:id/reset-password', async (req: AuthRequest, res: Response) => {
+  const { password } = req.body;
+  if (!password || typeof password !== 'string' || password.length < 6) {
+    res.status(400).json({ success: false, error: 'Password must be at least 6 characters' });
+    return;
+  }
+  const passwordHash = await bcrypt.hash(password, 10);
+  const [user] = await db.update(users).set({ passwordHash, updatedAt: new Date() }).where(eq(users.id, req.params.id)).returning();
+  if (!user) { res.status(404).json({ success: false, error: 'User not found' }); return; }
+  await logAudit({ userId: user.id, userName: user.email, action: 'Password Reset', detail: 'Password reset by admin', type: 'security', severity: 'warning' });
+  res.json({ success: true });
 });
 
 // POST /admin/users/:id/ban
