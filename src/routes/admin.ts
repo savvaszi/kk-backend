@@ -65,7 +65,7 @@ router.get('/users/:id', async (req: AuthRequest, res: Response) => {
 
 // PATCH /admin/users/:id
 router.patch('/users/:id', async (req: AuthRequest, res: Response) => {
-  const allowed = ['firstName', 'lastName', 'email', 'username', 'level', 'status'] as const;
+  const allowed = ['firstName', 'lastName', 'email', 'username', 'level', 'status', 'isAdmin'] as const;
   const updates: Record<string, unknown> = {};
   for (const field of allowed) {
     if (field in req.body) updates[field] = req.body[field];
@@ -110,6 +110,60 @@ router.post('/users/:id/unban', async (req: AuthRequest, res: Response) => {
     .returning();
   if (!user) { res.status(404).json({ success: false, error: 'User not found' }); return; }
   await logAudit({ userId: user.id, userName: user.email, action: 'Account Unbanned', detail: 'Account restored by admin', type: 'security', severity: 'info' });
+  res.json({ success: true });
+});
+
+// POST /admin/users (create manually)
+router.post('/users', async (req: AuthRequest, res: Response) => {
+  const { email, username, password, firstName, lastName, level = 0, status = 'active' } = req.body;
+  if (!email || !username || !password) {
+    res.status(400).json({ success: false, error: 'email, username and password are required' }); return;
+  }
+  if (typeof password !== 'string' || password.length < 6) {
+    res.status(400).json({ success: false, error: 'Password must be at least 6 characters' }); return;
+  }
+  const passwordHash = await hashPassword(password);
+  try {
+    const [user] = await db.insert(users)
+      .values({ email, username, passwordHash, firstName, lastName, level, status, emailVerified: true })
+      .returning();
+    await logAudit({ userId: user.id, userName: user.email, action: 'User Created', detail: 'Account created by admin', type: 'admin', severity: 'info' });
+    res.status(201).json({ success: true, data: safeUser(user) });
+  } catch (err: any) {
+    if (err.code === '23505') {
+      res.status(409).json({ success: false, error: 'Email or username already in use' });
+    } else {
+      res.status(500).json({ success: false, error: 'Failed to create user' });
+    }
+  }
+});
+
+// PATCH /admin/users/:id/kyc
+router.patch('/users/:id/kyc', async (req: AuthRequest, res: Response) => {
+  const { kycStatus } = req.body;
+  if (!['none','pending','approved','rejected'].includes(kycStatus)) {
+    res.status(400).json({ success: false, error: 'Invalid kycStatus' }); return;
+  }
+  const severity = kycStatus === 'approved' ? 'success' : kycStatus === 'rejected' ? 'warning' : 'info';
+  const [user] = await db.update(users)
+    .set({ kycStatus, kycReviewedAt: new Date(), updatedAt: new Date() })
+    .where(eq(users.id, req.params.id))
+    .returning();
+  if (!user) { res.status(404).json({ success: false, error: 'User not found' }); return; }
+  await logAudit({ userId: user.id, userName: user.email, action: `KYC ${kycStatus}`, detail: `KYC status set to ${kycStatus} by admin`, type: 'kyc', severity });
+  res.json({ success: true, data: safeUser(user) });
+});
+
+// POST /admin/users/:id/notify
+router.post('/users/:id/notify', async (req: AuthRequest, res: Response) => {
+  const { title, body, type = 'info' } = req.body;
+  if (!title || !body) {
+    res.status(400).json({ success: false, error: 'title and body are required' }); return;
+  }
+  const [user] = await db.select().from(users).where(eq(users.id, req.params.id)).limit(1);
+  if (!user) { res.status(404).json({ success: false, error: 'User not found' }); return; }
+  await db.insert(adminNotifications).values({ title: `[${user.email}] ${title}`, body, type });
+  await logAudit({ userId: user.id, userName: user.email, action: 'Notification Sent', detail: title, type: 'admin', severity: 'info' });
   res.json({ success: true });
 });
 

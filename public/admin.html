@@ -196,11 +196,33 @@ const PageDashboard = ({ stats, audit }) => (
 );
 
 // ── Page: Users ───────────────────────────────────────────────
-const PageUsers = ({ users, reload }) => {
+const PageUsers = ({ users, sessions, reload }) => {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
   const [selected, setSelected] = useState(null);
   const [acting, setActing] = useState(null);
+  const [activePanel, setActivePanel] = useState(null);
+  const [showCreate, setShowCreate] = useState(false);
+
+  // Edit state
+  const [editForm, setEditForm] = useState({});
+  const [editSaving, setEditSaving] = useState(false);
+  const [editMsg, setEditMsg] = useState('');
+
+  // Reset password state
+  const [newPwd, setNewPwd] = useState('');
+  const [resetMsg, setResetMsg] = useState('');
+  const [resetSaving, setResetSaving] = useState(false);
+
+  // Notify state
+  const [notifyForm, setNotifyForm] = useState({ title:'', body:'', type:'info' });
+  const [notifyMsg, setNotifyMsg] = useState('');
+  const [notifySaving, setNotifySaving] = useState(false);
+
+  // Create user state
+  const [createForm, setCreateForm] = useState({ email:'', username:'', password:'', firstName:'', lastName:'', level:'0', status:'active' });
+  const [createMsg, setCreateMsg] = useState('');
+  const [createSaving, setCreateSaving] = useState(false);
 
   const filtered = users.filter(u => {
     const q = search.toLowerCase();
@@ -208,57 +230,267 @@ const PageUsers = ({ users, reload }) => {
     return filter === 'all' ? match : match && u.status === filter;
   });
 
+  const selectUser = (u) => {
+    setSelected(u); setActivePanel(null);
+    setEditForm({ firstName:u.firstName||'', lastName:u.lastName||'', email:u.email, username:u.username, level:String(u.level), status:u.status });
+    setEditMsg(''); setResetMsg(''); setNewPwd('');
+    setNotifyForm({ title:'', body:'', type:'info' }); setNotifyMsg('');
+  };
+  const togglePanel = (p) => setActivePanel(a => a===p ? null : p);
+
   const banUser = async (u) => {
     setActing(u.id);
     await api(`/admin/users/${u.id}/ban`, { method:'POST', body:JSON.stringify({}) });
-    await reload();
-    setActing(null);
+    await reload(); setActing(null);
     if (selected?.id === u.id) setSelected(null);
   };
   const unbanUser = async (u) => {
     setActing(u.id);
     await api(`/admin/users/${u.id}/unban`, { method:'POST', body:JSON.stringify({}) });
-    await reload();
-    setActing(null);
+    await reload(); setActing(null);
+  };
+  const saveEdit = async (u) => {
+    setEditSaving(true); setEditMsg('');
+    const r = await api(`/admin/users/${u.id}`, { method:'PATCH', body:JSON.stringify({...editForm, level:parseInt(editForm.level)||0}) });
+    if (r.success) { setEditMsg('✓ Saved'); await reload(); } else { setEditMsg(r.error||'Failed'); }
+    setEditSaving(false);
+  };
+  const resetPwd = async (u) => {
+    if (!newPwd || newPwd.length<6) { setResetMsg('Minimum 6 characters'); return; }
+    setResetSaving(true); setResetMsg('');
+    const r = await api(`/admin/users/${u.id}/reset-password`, { method:'POST', body:JSON.stringify({ password:newPwd }) });
+    if (r.success) { setResetMsg('✓ Password updated'); setNewPwd(''); } else { setResetMsg(r.error||'Failed'); }
+    setResetSaving(false);
+  };
+  const updateKyc = async (u, kycStatus) => {
+    setActing(`kyc-${u.id}`);
+    await api(`/admin/users/${u.id}/kyc`, { method:'PATCH', body:JSON.stringify({ kycStatus }) });
+    await reload(); setActing(null);
+  };
+  const sendNotify = async (u) => {
+    if (!notifyForm.title||!notifyForm.body) { setNotifyMsg('Title and message required'); return; }
+    setNotifySaving(true); setNotifyMsg('');
+    const r = await api(`/admin/users/${u.id}/notify`, { method:'POST', body:JSON.stringify(notifyForm) });
+    if (r.success) { setNotifyMsg('✓ Notification sent'); setNotifyForm({ title:'', body:'', type:'info' }); } else { setNotifyMsg(r.error||'Failed'); }
+    setNotifySaving(false);
+  };
+  const promoteAdmin = async (u) => {
+    setActing(`adm-${u.id}`);
+    await api(`/admin/users/${u.id}`, { method:'PATCH', body:JSON.stringify({ isAdmin:!u.isAdmin }) });
+    await reload(); setActing(null);
+  };
+  const revokeSession = async (id) => {
+    setActing(`sess-${id}`);
+    await api(`/admin/sessions/${id}`, { method:'DELETE' });
+    await reload(); setActing(null);
+  };
+  const exportCSV = () => {
+    const headers = ['ID','Email','Username','First Name','Last Name','Status','Level','KYC','Admin','2FA','Score','Joined'];
+    const rows = users.map(u=>[u.id,u.email,u.username,u.firstName||'',u.lastName||'',u.status,u.level,u.kycStatus||'none',u.isAdmin?'Yes':'No',u.twoFaEnabled?'Yes':'No',u.securityScore,fmtDate(u.createdAt)]);
+    const csv = [headers,...rows].map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv],{type:'text/csv'});
+    const a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`users-${new Date().toISOString().slice(0,10)}.csv`; a.click();
+  };
+  const createUser = async () => {
+    if (!createForm.email||!createForm.username||!createForm.password) { setCreateMsg('Email, username and password required'); return; }
+    setCreateSaving(true); setCreateMsg('');
+    const r = await api('/admin/users', { method:'POST', body:JSON.stringify({...createForm, level:parseInt(createForm.level)||0}) });
+    if (r.success) { setShowCreate(false); setCreateForm({ email:'', username:'', password:'', firstName:'', lastName:'', level:'0', status:'active' }); setCreateMsg(''); await reload(); }
+    else { setCreateMsg(r.error||'Failed'); }
+    setCreateSaving(false);
   };
 
+  // ── Panel shared styles ──
+  const panelStyle = (accent) => ({ background:C.card, border:`1px solid ${accent}40`, borderRadius:12, padding:22, marginBottom:16 });
+  const panelTitle = (icon, label, color) => (
+    <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:16, fontSize:14, fontWeight:700, color }}>
+      <Icon d={Icons[icon]} size={14} color={color} stroke/> {label}
+    </div>
+  );
+  const inputStyle = { width:'100%', background:C.card2, border:`1px solid ${C.border}`, borderRadius:8, padding:'9px 12px', color:C.text, fontSize:13, outline:'none' };
+  const labelStyle = { fontSize:11, color:C.muted, display:'block', marginBottom:4 };
+
+  // ── User Detail ──
   if (selected) {
     const u = users.find(x=>x.id===selected.id) || selected;
+    const userSessions = (sessions||[]).filter(s=>s.userId===u.id);
+    const kycColor = {approved:'green',rejected:'red',pending:'yellow',none:'gray'}[u.kycStatus||'none']||'gray';
+
     return (
       <div style={{ padding:'28px 32px', overflowY:'auto', height:'100%' }}>
-        <button onClick={()=>setSelected(null)} style={{ display:'flex', alignItems:'center', gap:6, background:'none', border:'none', color:C.muted, cursor:'pointer', fontSize:13, marginBottom:20, padding:0 }}>← Back to Users</button>
-        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14, padding:28, marginBottom:20, display:'flex', alignItems:'center', gap:24 }}>
-          <div style={{ width:72, height:72, borderRadius:'50%', background:`hsl(${u.id.charCodeAt(0)*7},40%,22%)`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:28, fontWeight:700, border:`3px solid ${C.border2}` }}>
-            {(displayName(u)||'?')[0].toUpperCase()}
-          </div>
-          <div style={{ flex:1 }}>
-            <div style={{ fontSize:20, fontWeight:700 }}>{displayName(u)}</div>
-            <div style={{ fontSize:13, color:C.muted, marginTop:3 }}>@{u.username} · {u.email}</div>
-            <div style={{ display:'flex', gap:8, marginTop:10 }}>
-              <Badge color={u.status==='active'?'green':u.status==='banned'?'red':'yellow'}>{u.status}</Badge>
-              <Badge color="gray">Level {u.level}</Badge>
-              {u.twoFaEnabled && <Badge color="green">2FA On</Badge>}
-              <Badge color={u.securityScore>=60?'green':u.securityScore>=40?'yellow':'red'}>Score: {u.securityScore}/100</Badge>
+        <button onClick={()=>setSelected(null)} style={{ display:'flex',alignItems:'center',gap:6,background:'none',border:'none',color:C.muted,cursor:'pointer',fontSize:13,marginBottom:20,padding:0 }}>← Back to Users</button>
+
+        {/* Header card */}
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14, padding:24, marginBottom:16 }}>
+          <div style={{ display:'flex', alignItems:'flex-start', gap:20, flexWrap:'wrap' }}>
+            <div style={{ width:64, height:64, borderRadius:'50%', background:`hsl(${u.id.charCodeAt(0)*7},40%,22%)`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:24, fontWeight:700, border:`3px solid ${C.border2}`, flexShrink:0 }}>
+              {(displayName(u)||'?')[0].toUpperCase()}
+            </div>
+            <div style={{ flex:1 }}>
+              <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+                <div style={{ fontSize:20, fontWeight:700 }}>{displayName(u)}</div>
+                {u.isAdmin && <Badge color="purple">Admin</Badge>}
+              </div>
+              <div style={{ fontSize:13, color:C.muted, marginTop:3 }}>@{u.username} · {u.email}</div>
+              <div style={{ display:'flex', gap:6, marginTop:8, flexWrap:'wrap' }}>
+                <Badge color={u.status==='active'?'green':u.status==='banned'?'red':'yellow'}>{u.status}</Badge>
+                <Badge color="gray">Lvl {u.level}</Badge>
+                {u.twoFaEnabled&&<Badge color="green">2FA</Badge>}
+                <Badge color={u.securityScore>=60?'green':u.securityScore>=40?'yellow':'red'}>Score {u.securityScore}</Badge>
+                <Badge color={kycColor}>KYC: {u.kycStatus||'none'}</Badge>
+              </div>
             </div>
           </div>
-          <div style={{ display:'flex', gap:10 }}>
+          {/* Action buttons */}
+          <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginTop:18, paddingTop:16, borderTop:`1px solid ${C.border}` }}>
+            <Btn variant={activePanel==='edit'?'primary':'ghost'} icon="edit" onClick={()=>togglePanel('edit')} size="sm">Edit</Btn>
+            <Btn variant={activePanel==='reset'?'primary':'ghost'} icon="lock" onClick={()=>togglePanel('reset')} size="sm">Reset Password</Btn>
+            <Btn variant={activePanel==='kyc'?'primary':'ghost'} icon="check" onClick={()=>togglePanel('kyc')} size="sm">KYC Review</Btn>
+            <Btn variant={activePanel==='notify'?'primary':'ghost'} icon="send" onClick={()=>togglePanel('notify')} size="sm">Notify</Btn>
+            <Btn variant={activePanel==='sessions'?'primary':'ghost'} icon="activity" onClick={()=>togglePanel('sessions')} size="sm">Sessions ({userSessions.length})</Btn>
+            <Btn variant={u.isAdmin?'danger':'ghost'} icon="security" onClick={()=>promoteAdmin(u)} disabled={acting===`adm-${u.id}`} size="sm">
+              {u.isAdmin?'Revoke Admin':'Make Admin'}
+            </Btn>
             {u.status!=='banned'
-              ? <Btn variant="danger" icon="ban" onClick={()=>banUser(u)} disabled={acting===u.id}>Ban User</Btn>
-              : <Btn variant="ghost" icon="check" onClick={()=>unbanUser(u)} disabled={acting===u.id}>Unban</Btn>
+              ?<Btn variant="danger" icon="ban" onClick={()=>banUser(u)} disabled={acting===u.id} size="sm">Ban</Btn>
+              :<Btn variant="ghost" icon="check" onClick={()=>unbanUser(u)} disabled={acting===u.id} size="sm">Unban</Btn>
             }
           </div>
         </div>
+
+        {/* ── Edit Panel ── */}
+        {activePanel==='edit' && (
+          <div style={panelStyle(C.orange)}>
+            {panelTitle('edit','Edit User',C.orange)}
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+              {[['First Name','firstName'],['Last Name','lastName'],['Email','email'],['Username','username']].map(([label,key])=>(
+                <div key={key}>
+                  <label style={labelStyle}>{label}</label>
+                  <input value={editForm[key]||''} onChange={e=>setEditForm(f=>({...f,[key]:e.target.value}))} style={inputStyle}/>
+                </div>
+              ))}
+              <div>
+                <label style={labelStyle}>Level (0–5)</label>
+                <input type="number" min="0" max="5" value={editForm.level||'0'} onChange={e=>setEditForm(f=>({...f,level:e.target.value}))} style={inputStyle}/>
+              </div>
+              <div>
+                <label style={labelStyle}>Status</label>
+                <select value={editForm.status||'active'} onChange={e=>setEditForm(f=>({...f,status:e.target.value}))} style={inputStyle}>
+                  {['active','pending','suspended','banned'].map(s=><option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+            </div>
+            <div style={{ display:'flex', alignItems:'center', gap:12, marginTop:14 }}>
+              <Btn onClick={()=>saveEdit(u)} disabled={editSaving}>{editSaving?'Saving…':'Save Changes'}</Btn>
+              {editMsg&&<span style={{ fontSize:12, color:editMsg.startsWith('✓')?C.green:C.red }}>{editMsg}</span>}
+            </div>
+          </div>
+        )}
+
+        {/* ── Reset Password Panel ── */}
+        {activePanel==='reset' && (
+          <div style={panelStyle(C.blue)}>
+            {panelTitle('lock','Reset Password',C.blue)}
+            <div style={{ display:'flex', gap:10, alignItems:'flex-end', flexWrap:'wrap' }}>
+              <div style={{ flex:1, minWidth:200 }}>
+                <label style={labelStyle}>New Password (min 6 chars)</label>
+                <input type="password" value={newPwd} onChange={e=>setNewPwd(e.target.value)} placeholder="Enter new password" style={inputStyle}/>
+              </div>
+              <Btn onClick={()=>resetPwd(u)} disabled={resetSaving}>{resetSaving?'Updating…':'Set Password'}</Btn>
+            </div>
+            {resetMsg&&<div style={{ fontSize:12, color:resetMsg.startsWith('✓')?C.green:C.red, marginTop:8 }}>{resetMsg}</div>}
+          </div>
+        )}
+
+        {/* ── KYC Panel ── */}
+        {activePanel==='kyc' && (
+          <div style={panelStyle(C.yellow)}>
+            {panelTitle('audit','KYC Review',C.yellow)}
+            <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
+              <div>
+                <div style={{ fontSize:11, color:C.muted, marginBottom:4 }}>Current Status</div>
+                <Badge color={kycColor}>{u.kycStatus||'none'}</Badge>
+              </div>
+              {u.sumsubApplicantId&&(
+                <div>
+                  <div style={{ fontSize:11, color:C.muted, marginBottom:4 }}>Sumsub Applicant ID</div>
+                  <code style={{ fontSize:11, color:C.orange, background:C.orangeBg, padding:'3px 8px', borderRadius:5 }}>{u.sumsubApplicantId}</code>
+                </div>
+              )}
+              {u.kycReviewedAt&&(
+                <div>
+                  <div style={{ fontSize:11, color:C.muted, marginBottom:4 }}>Last Reviewed</div>
+                  <span style={{ fontSize:12 }}>{fmtDate(u.kycReviewedAt)}</span>
+                </div>
+              )}
+            </div>
+            <div style={{ display:'flex', gap:8, marginTop:14 }}>
+              <Btn onClick={()=>updateKyc(u,'approved')} disabled={acting===`kyc-${u.id}`||u.kycStatus==='approved'}>Approve</Btn>
+              <Btn variant="danger" onClick={()=>updateKyc(u,'rejected')} disabled={acting===`kyc-${u.id}`||u.kycStatus==='rejected'}>Reject</Btn>
+              <Btn variant="ghost" onClick={()=>updateKyc(u,'pending')} disabled={acting===`kyc-${u.id}`||u.kycStatus==='pending'}>Set Pending</Btn>
+              <Btn variant="ghost" onClick={()=>updateKyc(u,'none')} disabled={acting===`kyc-${u.id}`||u.kycStatus==='none'}>Reset</Btn>
+            </div>
+          </div>
+        )}
+
+        {/* ── Send Notification Panel ── */}
+        {activePanel==='notify' && (
+          <div style={panelStyle(C.purple)}>
+            {panelTitle('bell','Send Notification',C.purple)}
+            <div style={{ display:'grid', gridTemplateColumns:'1fr auto', gap:10, marginBottom:10 }}>
+              <div>
+                <label style={labelStyle}>Title</label>
+                <input value={notifyForm.title} onChange={e=>setNotifyForm(f=>({...f,title:e.target.value}))} placeholder="Notification title" style={inputStyle}/>
+              </div>
+              <div>
+                <label style={labelStyle}>Type</label>
+                <select value={notifyForm.type} onChange={e=>setNotifyForm(f=>({...f,type:e.target.value}))} style={{...inputStyle,width:120}}>
+                  {['info','warning','danger','success'].map(t=><option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+            </div>
+            <div style={{ marginBottom:12 }}>
+              <label style={labelStyle}>Message</label>
+              <textarea value={notifyForm.body} onChange={e=>setNotifyForm(f=>({...f,body:e.target.value}))} placeholder="Notification message…" rows={3} style={{...inputStyle,resize:'vertical'}}/>
+            </div>
+            <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+              <Btn icon="send" onClick={()=>sendNotify(u)} disabled={notifySaving}>{notifySaving?'Sending…':'Send Notification'}</Btn>
+              {notifyMsg&&<span style={{ fontSize:12, color:notifyMsg.startsWith('✓')?C.green:C.red }}>{notifyMsg}</span>}
+            </div>
+          </div>
+        )}
+
+        {/* ── Sessions Panel ── */}
+        {activePanel==='sessions' && (
+          <div style={panelStyle(C.green)}>
+            {panelTitle('activity',`Sessions (${userSessions.length} active)`,C.green)}
+            {userSessions.length===0&&<div style={{ color:C.muted, fontSize:13 }}>No active sessions for this user.</div>}
+            {userSessions.map((s,i)=>(
+              <div key={s.id} style={{ display:'flex', alignItems:'center', gap:12, padding:'10px 0', borderTop:i>0?`1px solid ${C.border}`:'none' }}>
+                <div style={{ width:32,height:32,borderRadius:8,background:C.border2,display:'flex',alignItems:'center',justifyContent:'center' }}><Icon d={Icons.globe} size={14} color={C.muted} stroke/></div>
+                <div style={{ flex:1 }}>
+                  <div style={{ fontSize:12,fontWeight:600 }}>{s.device||'Unknown device'}</div>
+                  <div style={{ fontSize:11,color:C.muted }}>{s.location||'Unknown'} · {s.ipAddress||'—'} · {timeAgo(s.lastActiveAt)}</div>
+                </div>
+                <button onClick={()=>revokeSession(s.id)} disabled={acting===`sess-${s.id}`} style={{ background:C.redBg,border:'none',borderRadius:6,padding:'5px 10px',color:C.red,cursor:'pointer',fontSize:11,fontWeight:600 }}>Revoke</button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ── Account Details ── */}
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:22 }}>
           <div style={{ fontWeight:600, marginBottom:16, fontSize:14 }}>Account Details</div>
           {[
-            ['Email', u.email], ['Username', '@'+u.username], ['Status', u.status],
-            ['Joined', fmtDate(u.createdAt)], ['Last Seen', timeAgo(u.lastSeenAt)],
-            ['Country', u.country||'—'], ['Phone', u.phone||'—'],
-            ['Email Verified', u.emailVerified?'Yes':'No'],
-            ['2FA', u.twoFaEnabled?'Enabled':'Disabled'],
-            ['Security Score', u.securityScore+'/100'],
+            ['Email',u.email],['Username','@'+u.username],['Status',u.status],
+            ['KYC Status',u.kycStatus||'none'],['Admin',u.isAdmin?'Yes':'No'],
+            ['Joined',fmtDate(u.createdAt)],['Last Seen',timeAgo(u.lastSeenAt)],
+            ['Country',u.country||'—'],['Phone',u.phone||'—'],
+            ['Email Verified',u.emailVerified?'Yes':'No'],
+            ['2FA',u.twoFaEnabled?'Enabled':'Disabled'],
+            ['Security Score',u.securityScore+'/100'],
           ].map(([k,v])=>(
-            <div key={k} style={{ display:'flex', justifyContent:'space-between', padding:'8px 0', borderBottom:`1px solid ${C.border}`, fontSize:13 }}>
+            <div key={k} style={{ display:'flex',justifyContent:'space-between',padding:'8px 0',borderBottom:`1px solid ${C.border}`,fontSize:13 }}>
               <span style={{ color:C.muted }}>{k}</span><span>{String(v)}</span>
             </div>
           ))}
@@ -267,12 +499,56 @@ const PageUsers = ({ users, reload }) => {
     );
   }
 
+  // ── User List ──
   return (
     <div style={{ padding:'28px 32px', overflowY:'auto', height:'100%' }}>
+      {/* Create User Modal */}
+      {showCreate && (
+        <div style={{ position:'fixed',inset:0,background:'rgba(0,0,0,.6)',zIndex:200,display:'flex',alignItems:'center',justifyContent:'center' }}>
+          <div style={{ background:C.card,border:`1px solid ${C.border}`,borderRadius:16,padding:28,width:480,maxWidth:'95vw' }}>
+            <div style={{ display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20 }}>
+              <div style={{ fontSize:16,fontWeight:700 }}>Create User</div>
+              <button onClick={()=>{ setShowCreate(false); setCreateMsg(''); }} style={{ background:'none',border:'none',color:C.muted,cursor:'pointer',fontSize:18,lineHeight:1 }}>✕</button>
+            </div>
+            <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:12 }}>
+              {[['Email','email','text'],['Username','username','text'],['First Name','firstName','text'],['Last Name','lastName','text']].map(([label,key,type])=>(
+                <div key={key}>
+                  <label style={{ fontSize:11,color:C.muted,display:'block',marginBottom:4 }}>{label}</label>
+                  <input type={type} value={createForm[key]||''} onChange={e=>setCreateForm(f=>({...f,[key]:e.target.value}))} style={{ width:'100%',background:C.card2,border:`1px solid ${C.border}`,borderRadius:8,padding:'9px 12px',color:C.text,fontSize:13,outline:'none' }}/>
+                </div>
+              ))}
+              <div style={{ gridColumn:'1/-1' }}>
+                <label style={{ fontSize:11,color:C.muted,display:'block',marginBottom:4 }}>Password (min 6)</label>
+                <input type="password" value={createForm.password} onChange={e=>setCreateForm(f=>({...f,password:e.target.value}))} style={{ width:'100%',background:C.card2,border:`1px solid ${C.border}`,borderRadius:8,padding:'9px 12px',color:C.text,fontSize:13,outline:'none' }}/>
+              </div>
+              <div>
+                <label style={{ fontSize:11,color:C.muted,display:'block',marginBottom:4 }}>Level</label>
+                <input type="number" min="0" max="5" value={createForm.level} onChange={e=>setCreateForm(f=>({...f,level:e.target.value}))} style={{ width:'100%',background:C.card2,border:`1px solid ${C.border}`,borderRadius:8,padding:'9px 12px',color:C.text,fontSize:13,outline:'none' }}/>
+              </div>
+              <div>
+                <label style={{ fontSize:11,color:C.muted,display:'block',marginBottom:4 }}>Status</label>
+                <select value={createForm.status} onChange={e=>setCreateForm(f=>({...f,status:e.target.value}))} style={{ width:'100%',background:C.card2,border:`1px solid ${C.border}`,borderRadius:8,padding:'9px 12px',color:C.text,fontSize:13,outline:'none' }}>
+                  {['active','pending','suspended'].map(s=><option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+            </div>
+            <div style={{ display:'flex',alignItems:'center',gap:12,marginTop:18 }}>
+              <Btn size="md" onClick={createUser} disabled={createSaving}>{createSaving?'Creating…':'Create User'}</Btn>
+              <Btn size="md" variant="ghost" onClick={()=>{ setShowCreate(false); setCreateMsg(''); }}>Cancel</Btn>
+              {createMsg&&<span style={{ fontSize:12,color:createMsg.startsWith('✓')?C.green:C.red }}>{createMsg}</span>}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:24 }}>
         <div>
           <div style={{ fontSize:22, fontWeight:700 }}>User Management</div>
           <div style={{ fontSize:13, color:C.muted, marginTop:4 }}>{users.length} total users</div>
+        </div>
+        <div style={{ display:'flex', gap:8 }}>
+          <Btn variant="ghost" icon="download" onClick={exportCSV} size="sm">Export CSV</Btn>
+          <Btn icon="plus" onClick={()=>setShowCreate(true)} size="sm">Create User</Btn>
         </div>
       </div>
       <div style={{ display:'flex', gap:12, marginBottom:20, alignItems:'center' }}>
@@ -289,7 +565,7 @@ const PageUsers = ({ users, reload }) => {
         <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
           <thead>
             <tr style={{ borderBottom:`1px solid ${C.border}` }}>
-              {['User','Email','Status','Score','2FA','Joined','Actions'].map(h=>(
+              {['User','Email','Status','KYC','Score','2FA','Joined','Actions'].map(h=>(
                 <th key={h} style={{ padding:'12px 16px', textAlign:'left', color:C.muted, fontWeight:600, fontSize:11 }}>{h}</th>
               ))}
             </tr>
@@ -305,13 +581,16 @@ const PageUsers = ({ users, reload }) => {
                       {(displayName(u)||'?')[0].toUpperCase()}
                     </div>
                     <div>
-                      <div style={{ fontWeight:600 }}>{displayName(u)}</div>
+                      <div style={{ fontWeight:600, display:'flex', alignItems:'center', gap:5 }}>
+                        {displayName(u)}{u.isAdmin&&<Badge color="purple" small>Admin</Badge>}
+                      </div>
                       <div style={{ fontSize:11, color:C.muted }}>@{u.username}</div>
                     </div>
                   </div>
                 </td>
                 <td style={{ padding:'13px 16px', color:C.muted }}>{u.email}</td>
                 <td style={{ padding:'13px 16px' }}><Badge color={u.status==='active'?'green':u.status==='banned'?'red':'yellow'} small>{u.status}</Badge></td>
+                <td style={{ padding:'13px 16px' }}><Badge color={{approved:'green',rejected:'red',pending:'yellow',none:'gray'}[u.kycStatus||'none']||'gray'} small>{u.kycStatus||'none'}</Badge></td>
                 <td style={{ padding:'13px 16px' }}>
                   <div style={{ display:'flex', alignItems:'center', gap:8 }}>
                     <div style={{ width:50, height:4, background:C.border2, borderRadius:3 }}>
@@ -324,12 +603,12 @@ const PageUsers = ({ users, reload }) => {
                 <td style={{ padding:'13px 16px', color:C.muted }}>{fmtDate(u.createdAt)}</td>
                 <td style={{ padding:'13px 16px' }}>
                   <div style={{ display:'flex', gap:6 }}>
-                    <button onClick={()=>setSelected(u)} style={{ background:C.blueBg, border:'none', borderRadius:6, padding:'5px 8px', color:C.blue, cursor:'pointer', fontSize:11, fontWeight:600, display:'flex', alignItems:'center', gap:4 }}>
+                    <button onClick={()=>selectUser(u)} style={{ background:C.blueBg, border:'none', borderRadius:6, padding:'5px 8px', color:C.blue, cursor:'pointer', fontSize:11, fontWeight:600, display:'flex', alignItems:'center', gap:4 }}>
                       <Icon d={Icons.eye} size={12} color={C.blue} stroke/> View
                     </button>
                     {u.status!=='banned'
-                      ? <button onClick={()=>banUser(u)} disabled={acting===u.id} style={{ background:C.redBg, border:'none', borderRadius:6, padding:'5px 10px', color:C.red, cursor:'pointer', fontSize:11, fontWeight:600 }}>Ban</button>
-                      : <button onClick={()=>unbanUser(u)} disabled={acting===u.id} style={{ background:C.greenBg, border:'none', borderRadius:6, padding:'5px 10px', color:C.green, cursor:'pointer', fontSize:11, fontWeight:600 }}>Unban</button>
+                      ?<button onClick={()=>banUser(u)} disabled={acting===u.id} style={{ background:C.redBg, border:'none', borderRadius:6, padding:'5px 10px', color:C.red, cursor:'pointer', fontSize:11, fontWeight:600 }}>Ban</button>
+                      :<button onClick={()=>unbanUser(u)} disabled={acting===u.id} style={{ background:C.greenBg, border:'none', borderRadius:6, padding:'5px 10px', color:C.green, cursor:'pointer', fontSize:11, fontWeight:600 }}>Unban</button>
                     }
                   </div>
                 </td>
@@ -1237,7 +1516,7 @@ const App = () => {
 
   const pages = {
     dashboard:  () => <PageDashboard stats={stats} audit={audit}/>,
-    users:      () => <PageUsers users={users} reload={reload}/>,
+    users:      () => <PageUsers users={users} sessions={sessions} reload={reload}/>,
     security:   () => <PageSecurity users={users} sessions={sessions} stats={stats} reload={reload}/>,
     api:        () => <PageAPIKeys apiKeys={apiKeysList} reload={reload}/>,
     audit:      () => <PageAudit audit={audit}/>,
