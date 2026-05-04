@@ -31,6 +31,17 @@
 <script type="text/babel">
 const { useState, useEffect, useCallback } = React;
 
+// ── Mobile detection ──────────────────────────────────────────
+const useIsMobile = () => {
+  const [mobile, setMobile] = useState(() => window.innerWidth < 768);
+  useEffect(() => {
+    const fn = () => setMobile(window.innerWidth < 768);
+    window.addEventListener('resize', fn);
+    return () => window.removeEventListener('resize', fn);
+  }, []);
+  return mobile;
+};
+
 // ── Auth ──────────────────────────────────────────────────────
 const token = localStorage.getItem('kk_token');
 if (!token) window.location.replace('/login.html');
@@ -1334,7 +1345,7 @@ const NAV = [
   { id:'settings',   label:'Settings',      icon:'settings',   sub:'Configuration'   },
 ];
 
-const Sidebar = ({ active, setActive, notifications }) => {
+const Sidebar = ({ active, setActive, notifications, isMobile, sidebarOpen }) => {
   const unread = notifications.filter(n=>!n.isRead).length;
   const [dark, setDark] = useState(() => {
     const saved = localStorage.getItem('kk_admin_theme');
@@ -1348,7 +1359,7 @@ const Sidebar = ({ active, setActive, notifications }) => {
     localStorage.setItem('kk_admin_theme', newDark ? 'dark' : 'light');
   };
   return (
-    <div style={{ width:220, background:C.sidebar, borderRight:`1px solid ${C.border}`, display:'flex', flexDirection:'column', height:'100vh', flexShrink:0 }}>
+    <div style={{ width:220, background:C.sidebar, borderRight:`1px solid ${C.border}`, display:'flex', flexDirection:'column', height:'100vh', flexShrink:0, ...(isMobile ? { position:'fixed', top:0, left:sidebarOpen?0:-220, zIndex:200, transition:'left 0.25s ease', boxShadow:sidebarOpen?'4px 0 24px rgba(0,0,0,0.4)':'none' } : {}) }}>
       <div style={{ padding:'22px 20px 18px', borderBottom:`1px solid ${C.border}` }}>
         <div style={{ display:'flex', alignItems:'center', gap:10 }}>
           <div>
@@ -1398,7 +1409,7 @@ const PROFILE_NAV = [
   { id:'notifs',    label:'Alerts',    icon:'bell'       },
 ];
 
-const Topbar = ({ active, setActive, reload, loading }) => {
+const Topbar = ({ active, setActive, reload, loading, isMobile, onMenuClick }) => {
   const page = NAV.find(n=>n.id===active)||NAV[0];
   const [open, setOpen] = useState(false);
   const ref = React.useRef(null);
@@ -1411,11 +1422,20 @@ const Topbar = ({ active, setActive, reload, loading }) => {
 
   return (
     <div style={{ height:56, background:C.sidebar, borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 24px', flexShrink:0 }}>
-      {/* Breadcrumb */}
-      <div style={{ display:'flex', alignItems:'center', gap:8, fontSize:13, color:C.muted }}>
-        <span style={{ color:C.orange }}>Admin</span>
-        <span>/</span>
-        <span style={{ color:C.text, fontWeight:600 }}>{page.label}</span>
+      {/* Hamburger (mobile only) + Breadcrumb */}
+      <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+        {isMobile && (
+          <button onClick={onMenuClick} style={{ background:'none', border:'none', cursor:'pointer', color:C.muted, padding:4, borderRadius:6, display:'flex', flexDirection:'column', gap:4 }}>
+            <span style={{ display:'block', width:18, height:2, background:C.text, borderRadius:2 }}/>
+            <span style={{ display:'block', width:18, height:2, background:C.text, borderRadius:2 }}/>
+            <span style={{ display:'block', width:18, height:2, background:C.text, borderRadius:2 }}/>
+          </button>
+        )}
+        <div style={{ display:'flex', alignItems:'center', gap:8, fontSize:13, color:C.muted }}>
+          <span style={{ color:C.orange }}>Admin</span>
+          <span>/</span>
+          <span style={{ color:C.text, fontWeight:600 }}>{page.label}</span>
+        </div>
       </div>
 
       {/* Right controls */}
@@ -1478,6 +1498,8 @@ const Topbar = ({ active, setActive, reload, loading }) => {
 
 // ── Root App ──────────────────────────────────────────────────
 const App = () => {
+  const isMobile = useIsMobile();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [active, setActive] = useState('dashboard');
   const [loading, setLoading] = useState(true);
   const [users, setUsers] = useState([]);
@@ -1528,9 +1550,13 @@ const App = () => {
 
   return (
     <div style={{ display:'flex', height:'100vh', overflow:'hidden' }}>
-      <Sidebar active={active} setActive={setActive} notifications={notifications}/>
+      {/* Mobile backdrop — tap to close sidebar */}
+      {isMobile && sidebarOpen && (
+        <div onClick={() => setSidebarOpen(false)} style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.55)', zIndex:199 }}/>
+      )}
+      <Sidebar active={active} setActive={(id) => { setActive(id); if (isMobile) setSidebarOpen(false); }} notifications={notifications} isMobile={isMobile} sidebarOpen={sidebarOpen}/>
       <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
-        <Topbar active={active} setActive={setActive} reload={reload} loading={loading}/>
+        <Topbar active={active} setActive={setActive} reload={reload} loading={loading} isMobile={isMobile} onMenuClick={() => setSidebarOpen(o => !o)}/>
         <div style={{ flex:1, overflowY:'auto', background:C.bg }}>
           {loading ? <Loading/> : <Page/>}
         </div>
