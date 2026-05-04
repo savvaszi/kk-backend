@@ -1600,16 +1600,225 @@ const PageFireblocks = ({ users }) => {
   );
 };
 
+// ── Page: Applications ────────────────────────────────────────
+const PageApplications = () => {
+  const [apps, setApps] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState('all');
+  const [search, setSearch] = useState('');
+  const [selected, setSelected] = useState(null);
+
+  const load = async (type = filter) => {
+    setLoading(true);
+    const r = await api(`/admin/applications?type=${type}&limit=500`);
+    if (r.success) setApps(r.data);
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const changeFilter = (f) => { setFilter(f); load(f); };
+
+  const filtered = apps.filter(a => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    const d = a.data || {};
+    return (a.userEmail||'').toLowerCase().includes(q)
+      || (a.userFirstName||'').toLowerCase().includes(q)
+      || (a.userLastName||'').toLowerCase().includes(q)
+      || (d.firstName||'').toLowerCase().includes(q)
+      || (d.lastName||'').toLowerCase().includes(q)
+      || (d.legalName||'').toLowerCase().includes(q)
+      || (d.email||'').toLowerCase().includes(q);
+  });
+
+  const exportCSV = () => {
+    const rows = filtered;
+    if (!rows.length) return;
+    const isPersonal = rows[0]?.type === 'personal';
+    const headers = isPersonal
+      ? ['ID','Type','Submitted','Email','First Name','Last Name','Date of Birth','Nationality','Citizenship','Passport No','Phone','Country','City','KYC Status','Documents']
+      : ['ID','Type','Submitted','Email','Legal Name','Country of Inc.','Registration No','Business Activities','Phone','KYC Status','Documents'];
+
+    const csvRows = rows.map(a => {
+      const d = a.data || {};
+      const docs = (a.documents||[]).map(dc=>dc.name).join('; ');
+      if (a.type === 'personal') {
+        return [a.id, a.type, new Date(a.submittedAt).toISOString(), a.userEmail||d.email||'', d.firstName||'', d.lastName||'', d.dateOfBirth||'', d.nationality||'', d.citizenship||'', d.passportNo||'', d.phone||'', d.country||'', d.city||'', a.kycStatus||'', docs];
+      } else {
+        return [a.id, a.type, new Date(a.submittedAt).toISOString(), a.userEmail||d.email||'', d.legalName||'', d.countryOfIncorporation||'', d.registrationNumber||'', d.businessActivities||'', d.phone||'', a.kycStatus||'', docs];
+      }
+    });
+
+    const escape = v => `"${String(v||'').replace(/"/g,'""')}"`;
+    const csv = [headers, ...csvRows].map(r => r.map(escape).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `applications_${filter}_${Date.now()}.csv`;
+    a.click(); URL.revokeObjectURL(url);
+  };
+
+  const downloadDoc = (app, idx) => {
+    const url = `/admin/applications/${app.userId}/document/${idx}`;
+    const a = document.createElement('a');
+    a.href = url;
+    a.setAttribute('download', '');
+    // Must include auth header — open via fetch then blob
+    fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.blob())
+      .then(blob => {
+        const blobUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = (app.documents[idx]?.name || `document_${idx}`);
+        link.click();
+        URL.revokeObjectURL(blobUrl);
+      });
+  };
+
+  const kycColor = (s) => ({ approved:'green', pending:'yellow', rejected:'red', none:'gray' }[s]||'gray');
+
+  return (
+    <div style={{ padding:'28px 32px', overflowY:'auto', height:'100%' }}>
+      {/* Header */}
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:24 }}>
+        <div>
+          <div style={{ fontSize:22, fontWeight:700 }}>Applications</div>
+          <div style={{ fontSize:13, color:C.muted, marginTop:4 }}>Account opening submissions — personal &amp; business</div>
+        </div>
+        <div style={{ display:'flex', gap:8 }}>
+          <Btn icon="download" variant="ghost" onClick={exportCSV}>Export CSV</Btn>
+          <Btn icon="refresh" variant="ghost" onClick={() => load()}>Refresh</Btn>
+        </div>
+      </div>
+
+      {/* Filters + search */}
+      <div style={{ display:'flex', gap:10, marginBottom:20, flexWrap:'wrap', alignItems:'center' }}>
+        {['all','personal','business'].map(f => (
+          <button key={f} onClick={() => changeFilter(f)} style={{ padding:'6px 16px', borderRadius:8, border:`1px solid ${filter===f?C.orange:C.border}`, background:filter===f?C.orangeBg:'transparent', color:filter===f?C.orange:C.muted, fontSize:12, fontWeight:600, cursor:'pointer', textTransform:'capitalize' }}>
+            {f === 'all' ? `All (${apps.length})` : `${f.charAt(0).toUpperCase()+f.slice(1)} (${apps.filter(a=>a.type===f).length})`}
+          </button>
+        ))}
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search name or email…"
+          style={{ marginLeft:'auto', padding:'7px 14px', borderRadius:8, border:`1px solid ${C.border}`, background:C.card2, color:C.text, fontSize:12, outline:'none', minWidth:220 }} />
+      </div>
+
+      {/* Table */}
+      {loading ? <Loading/> : (
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, overflow:'hidden' }}>
+          {!filtered.length ? (
+            <div style={{ padding:48, textAlign:'center', color:C.muted, fontSize:14 }}>No applications found.</div>
+          ) : (
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+              <thead>
+                <tr style={{ borderBottom:`1px solid ${C.border}`, background:C.card2 }}>
+                  {['Applicant','Type','Submitted','KYC Status','Documents','Actions'].map(h => (
+                    <th key={h} style={{ padding:'12px 16px', textAlign:'left', color:C.muted, fontWeight:600, fontSize:11, textTransform:'uppercase', letterSpacing:'.5px' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((app, i) => {
+                  const d = app.data || {};
+                  const name = app.type === 'personal'
+                    ? [d.firstName, d.lastName].filter(Boolean).join(' ') || app.userFirstName || '—'
+                    : d.legalName || '—';
+                  const email = app.userEmail || d.email || '—';
+                  const docs = app.documents || [];
+                  return (
+                    <tr key={app.id} style={{ borderBottom:`1px solid ${C.border}`, background:i%2===0?'transparent':C.card2 }}>
+                      <td style={{ padding:'12px 16px' }}>
+                        <div style={{ fontWeight:600, color:C.text }}>{name}</div>
+                        <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>{email}</div>
+                      </td>
+                      <td style={{ padding:'12px 16px' }}>
+                        <Badge color={app.type==='personal'?'blue':'purple'}>{app.type}</Badge>
+                      </td>
+                      <td style={{ padding:'12px 16px', color:C.muted, fontSize:12 }}>
+                        {fmtDate(app.submittedAt)}<br/>
+                        <span style={{ fontSize:11 }}>{timeAgo(app.submittedAt)}</span>
+                      </td>
+                      <td style={{ padding:'12px 16px' }}>
+                        <Badge color={kycColor(app.kycStatus)}>{app.kycStatus || 'none'}</Badge>
+                      </td>
+                      <td style={{ padding:'12px 16px' }}>
+                        {docs.length === 0
+                          ? <span style={{ color:C.muted, fontSize:12 }}>None</span>
+                          : docs.map((doc, idx) => (
+                              <button key={idx} onClick={() => downloadDoc(app, idx)}
+                                style={{ display:'block', marginBottom:4, padding:'3px 10px', borderRadius:6, border:`1px solid ${C.border}`, background:'transparent', color:C.orange, fontSize:11, cursor:'pointer', textAlign:'left', width:'100%' }}>
+                                ↓ {doc.name}
+                              </button>
+                            ))
+                        }
+                      </td>
+                      <td style={{ padding:'12px 16px' }}>
+                        <Btn variant="ghost" size="sm" onClick={() => setSelected(selected?.id===app.id?null:app)}>
+                          {selected?.id===app.id ? 'Hide' : 'Details'}
+                        </Btn>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {/* Detail panel */}
+      {selected && (
+        <div style={{ marginTop:20, background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:24 }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:18 }}>
+            <div style={{ fontSize:16, fontWeight:700 }}>
+              Application Detail — {selected.type === 'personal'
+                ? [selected.data?.firstName, selected.data?.lastName].filter(Boolean).join(' ') || selected.userEmail
+                : selected.data?.legalName || selected.userEmail}
+            </div>
+            <Btn variant="ghost" size="sm" onClick={() => setSelected(null)}>Close ✕</Btn>
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(280px,1fr))', gap:'8px 24px' }}>
+            {Object.entries(selected.data || {}).map(([k, v]) => {
+              if (!v || !String(v).trim()) return null;
+              const label = k.replace(/([A-Z])/g,' $1').replace(/^./, s=>s.toUpperCase());
+              return (
+                <div key={k} style={{ display:'flex', gap:8, padding:'8px 0', borderBottom:`1px solid ${C.border}` }}>
+                  <span style={{ color:C.muted, fontSize:12, minWidth:160, fontWeight:500 }}>{label}</span>
+                  <span style={{ color:C.text, fontSize:12, wordBreak:'break-word' }}>{String(v)}</span>
+                </div>
+              );
+            })}
+          </div>
+          {(selected.documents||[]).length > 0 && (
+            <div style={{ marginTop:16 }}>
+              <div style={{ fontSize:12, fontWeight:600, color:C.muted, textTransform:'uppercase', letterSpacing:'.5px', marginBottom:10 }}>Uploaded Documents</div>
+              <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
+                {selected.documents.map((doc, idx) => (
+                  <Btn key={idx} icon="download" variant="ghost" size="sm" onClick={() => downloadDoc(selected, idx)}>
+                    {doc.name} ({(doc.size/1024).toFixed(0)} KB)
+                  </Btn>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ── Sidebar ───────────────────────────────────────────────────
 const NAV = [
-  { id:'dashboard',  label:'Dashboard',     icon:'dashboard',  sub:'Overview'        },
-  { id:'users',      label:'Users',         icon:'users',      sub:'User Management' },
-  { id:'security',   label:'Security',      icon:'security',   sub:'Threat Center'   },
-  { id:'api',        label:'API Keys',      icon:'api',        sub:'Developer Access'},
-  { id:'audit',      label:'Audit Log',     icon:'audit',      sub:'Activity Trail'  },
-  { id:'notifs',     label:'Notifications', icon:'bell',       sub:'Alerts'          },
-  { id:'fireblocks', label:'Fireblocks',    icon:'fireblocks', sub:'Custody & Vaults'},
-  { id:'settings',   label:'Settings',      icon:'settings',   sub:'Configuration'   },
+  { id:'dashboard',     label:'Dashboard',     icon:'dashboard',  sub:'Overview'        },
+  { id:'users',         label:'Users',         icon:'users',      sub:'User Management' },
+  { id:'applications',  label:'Applications',  icon:'file',       sub:'Account Requests'},
+  { id:'security',      label:'Security',      icon:'security',   sub:'Threat Center'   },
+  { id:'api',           label:'API Keys',      icon:'api',        sub:'Developer Access'},
+  { id:'audit',         label:'Audit Log',     icon:'audit',      sub:'Activity Trail'  },
+  { id:'notifs',        label:'Notifications', icon:'bell',       sub:'Alerts'          },
+  { id:'fireblocks',    label:'Fireblocks',    icon:'fireblocks', sub:'Custody & Vaults'},
+  { id:'settings',      label:'Settings',      icon:'settings',   sub:'Configuration'   },
 ];
 
 const Sidebar = ({ active, setActive, notifications, isMobile, sidebarOpen }) => {
@@ -1804,14 +2013,15 @@ const App = () => {
   useEffect(() => { reload(); }, []);
 
   const pages = {
-    dashboard:  () => <PageDashboard stats={stats} audit={audit}/>,
-    users:      () => <PageUsers users={users} sessions={sessions} reload={reload}/>,
-    security:   () => <PageSecurity users={users} sessions={sessions} stats={stats} reload={reload}/>,
-    api:        () => <PageAPIKeys apiKeys={apiKeysList} reload={reload}/>,
-    audit:      () => <PageAudit audit={audit}/>,
-    notifs:     () => <PageNotifications notifications={notifications} reload={reload}/>,
-    fireblocks: () => <PageFireblocks users={users}/>,
-    settings:   () => <PageSettings settings={settings} reload={reload}/>,
+    dashboard:    () => <PageDashboard stats={stats} audit={audit}/>,
+    users:        () => <PageUsers users={users} sessions={sessions} reload={reload}/>,
+    applications: () => <PageApplications/>,
+    security:     () => <PageSecurity users={users} sessions={sessions} stats={stats} reload={reload}/>,
+    api:          () => <PageAPIKeys apiKeys={apiKeysList} reload={reload}/>,
+    audit:        () => <PageAudit audit={audit}/>,
+    notifs:       () => <PageNotifications notifications={notifications} reload={reload}/>,
+    fireblocks:   () => <PageFireblocks users={users}/>,
+    settings:     () => <PageSettings settings={settings} reload={reload}/>,
   };
   const Page = pages[active] || pages.dashboard;
 

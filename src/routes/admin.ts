@@ -2,7 +2,7 @@ import { Router } from 'express';
 import type { Response } from 'express';
 import { db } from '../db/index.js';
 import { users, userSessions, apiKeys, wallets, auditLogs, adminNotifications, platformSettings, fireblocksEvents, applications } from '../db/schema.js';
-import { eq, desc, ilike, or, count, and, lt } from 'drizzle-orm';
+import { eq, desc, ilike, or, count, and, lt, sql } from 'drizzle-orm';
 import { requireAuth, requireAdmin, type AuthRequest } from '../middleware/auth.js';
 import { logAudit } from '../lib/audit.js';
 import { invalidateMailer, testSmtp } from '../lib/mailer.js';
@@ -320,6 +320,38 @@ router.post('/smtp/test', async (req: AuthRequest, res: Response) => {
   } catch (err: any) {
     res.status(400).json({ success: false, error: err?.message || 'SMTP test failed' });
   }
+});
+
+// GET /admin/applications — list all applications with user info (no file data)
+router.get('/applications', async (req: AuthRequest, res: Response) => {
+  const { type, limit = '200', offset = '0' } = req.query as Record<string, string>;
+
+  const rows = await db
+    .select({
+      id:            applications.id,
+      userId:        applications.userId,
+      type:          applications.type,
+      data:          applications.data,
+      documents:     applications.documents,
+      submittedAt:   applications.submittedAt,
+      userEmail:     users.email,
+      userFirstName: users.firstName,
+      userLastName:  users.lastName,
+      kycStatus:     users.kycStatus,
+    })
+    .from(applications)
+    .leftJoin(users, eq(applications.userId, users.id))
+    .where(type && type !== 'all' ? eq(applications.type, type) : sql`1=1`)
+    .orderBy(desc(applications.submittedAt))
+    .limit(Math.min(parseInt(limit) || 200, 500))
+    .offset(parseInt(offset) || 0);
+
+  const sanitized = rows.map(app => ({
+    ...app,
+    documents: (app.documents as any[]).map(({ data: _data, ...meta }) => meta),
+  }));
+
+  res.json({ success: true, data: sanitized, total: sanitized.length });
 });
 
 // GET /admin/applications/:userId — latest application for a user (no file data)
