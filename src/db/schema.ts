@@ -160,6 +160,16 @@ export const orders = pgTable('orders', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
+// ── Applications (open-account form submissions) ──────────────────────────────
+export const applications = pgTable('applications', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+  type: varchar('type', { length: 20 }).notNull(),          // personal | business
+  data: jsonb('data').notNull().$type<Record<string, string>>(),
+  documents: jsonb('documents').notNull().$type<Array<{ name: string; mimetype: string; size: number; data: string }>>().default([]),
+  submittedAt: timestamp('submitted_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
 export const fireblocksEvents = pgTable('fireblocks_events', {
   id: uuid('id').primaryKey().defaultRandom(),
   // Fireblocks-provided identifiers

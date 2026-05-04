@@ -127,6 +127,7 @@ const Icons = {
   network:'M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v4m0 0H5m4 0h10M9 7v10m0 0H5a2 2 0 01-2-2v-4m6 6h10a2 2 0 002-2v-4m0 0h-6',
   sun:'M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364-.707.707M6.343 17.657l-.707.707M17.657 17.657l.707.707M6.343 6.343l-.707-.707M12 7a5 5 0 100 10 5 5 0 000-10z',
   moon:'M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z',
+  file:'M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z M14 2v6h6',
 };
 
 // ── Shared UI ─────────────────────────────────────────────────
@@ -235,6 +236,10 @@ const PageUsers = ({ users, sessions, reload }) => {
   const [createMsg, setCreateMsg] = useState('');
   const [createSaving, setCreateSaving] = useState(false);
 
+  // Application / KYC data state
+  const [application, setApplication] = useState(null);
+  const [appLoading, setAppLoading] = useState(false);
+
   const filtered = users.filter(u => {
     const q = search.toLowerCase();
     const match = displayName(u).toLowerCase().includes(q) || u.email.toLowerCase().includes(q) || u.username.toLowerCase().includes(q);
@@ -242,12 +247,24 @@ const PageUsers = ({ users, sessions, reload }) => {
   });
 
   const selectUser = (u) => {
-    setSelected(u); setActivePanel(null);
+    setSelected(u); setActivePanel(null); setApplication(null);
     setEditForm({ firstName:u.firstName||'', lastName:u.lastName||'', email:u.email, username:u.username, level:String(u.level), status:u.status });
     setEditMsg(''); setResetMsg(''); setNewPwd('');
     setNotifyForm({ title:'', body:'', type:'info' }); setNotifyMsg('');
   };
-  const togglePanel = (p) => setActivePanel(a => a===p ? null : p);
+  const togglePanel = (p) => {
+    setActivePanel(a => {
+      const next = a===p ? null : p;
+      if (next === 'kyc' && selected) {
+        setAppLoading(true);
+        api(`/admin/applications/${selected.id}`).then(r => {
+          setApplication(r.data || null);
+          setAppLoading(false);
+        }).catch(() => setAppLoading(false));
+      }
+      return next;
+    });
+  };
 
   const banUser = async (u) => {
     setActing(u.id);
@@ -417,17 +434,13 @@ const PageUsers = ({ users, sessions, reload }) => {
         {activePanel==='kyc' && (
           <div style={panelStyle(C.yellow)}>
             {panelTitle('audit','KYC Review',C.yellow)}
-            <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
+
+            {/* Status row + action buttons */}
+            <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap', marginBottom:14 }}>
               <div>
                 <div style={{ fontSize:11, color:C.muted, marginBottom:4 }}>Current Status</div>
                 <Badge color={kycColor}>{u.kycStatus||'none'}</Badge>
               </div>
-              {u.sumsubApplicantId&&(
-                <div>
-                  <div style={{ fontSize:11, color:C.muted, marginBottom:4 }}>Sumsub Applicant ID</div>
-                  <code style={{ fontSize:11, color:C.orange, background:C.orangeBg, padding:'3px 8px', borderRadius:5 }}>{u.sumsubApplicantId}</code>
-                </div>
-              )}
               {u.kycReviewedAt&&(
                 <div>
                   <div style={{ fontSize:11, color:C.muted, marginBottom:4 }}>Last Reviewed</div>
@@ -435,12 +448,161 @@ const PageUsers = ({ users, sessions, reload }) => {
                 </div>
               )}
             </div>
-            <div style={{ display:'flex', gap:8, marginTop:14 }}>
+            <div style={{ display:'flex', gap:8, marginBottom:20 }}>
               <Btn onClick={()=>updateKyc(u,'approved')} disabled={acting===`kyc-${u.id}`||u.kycStatus==='approved'}>Approve</Btn>
               <Btn variant="danger" onClick={()=>updateKyc(u,'rejected')} disabled={acting===`kyc-${u.id}`||u.kycStatus==='rejected'}>Reject</Btn>
               <Btn variant="ghost" onClick={()=>updateKyc(u,'pending')} disabled={acting===`kyc-${u.id}`||u.kycStatus==='pending'}>Set Pending</Btn>
               <Btn variant="ghost" onClick={()=>updateKyc(u,'none')} disabled={acting===`kyc-${u.id}`||u.kycStatus==='none'}>Reset</Btn>
             </div>
+
+            {/* Application data */}
+            {appLoading && (
+              <div style={{ color:C.muted, fontSize:13, padding:'12px 0' }}>Loading application data…</div>
+            )}
+
+            {!appLoading && !application && (
+              <div style={{ background:C.bg, border:`1px dashed ${C.border}`, borderRadius:8, padding:'14px 16px', fontSize:13, color:C.muted }}>
+                No application form submitted yet for this user.
+              </div>
+            )}
+
+            {!appLoading && application && (() => {
+              const apps = Array.isArray(application) ? application : [application];
+              return apps.map((app, ai) => {
+                const d = app.data || {};
+                const docs = app.documents || [];
+                const isPersonal = app.type === 'personal';
+                const sectionStyle = { marginBottom:20 };
+                const sectionHeader = (label) => (
+                  React.createElement('div', { style:{ fontSize:11, fontWeight:700, color:C.yellow, textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:8, paddingBottom:4, borderBottom:`1px solid ${C.yellow}30` } }, label)
+                );
+                const fieldRow = (label, value) => value ? (
+                  React.createElement('div', { key:label, style:{ display:'grid', gridTemplateColumns:'160px 1fr', gap:8, padding:'5px 0', borderBottom:`1px solid ${C.border}` } },
+                    React.createElement('span', { style:{ fontSize:12, color:C.muted } }, label),
+                    React.createElement('span', { style:{ fontSize:12, color:C.text, wordBreak:'break-word' } }, value)
+                  )
+                ) : null;
+
+                return React.createElement('div', { key:ai, style:{ background:C.bg, border:`1px solid ${C.border}`, borderRadius:10, padding:18, marginBottom: ai < apps.length-1 ? 16 : 0 } },
+                  /* Header */
+                  React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:10, marginBottom:16 } },
+                    React.createElement('span', { style:{ background: isPersonal ? '#00e67622':'#7c3aed22', color: isPersonal ? C.green:'#a78bfa', fontSize:11, fontWeight:700, padding:'3px 10px', borderRadius:20, textTransform:'uppercase', letterSpacing:'0.05em' } }, isPersonal ? '👤 Personal' : '🏢 Business'),
+                    React.createElement('span', { style:{ fontSize:11, color:C.muted } }, 'Submitted: ' + fmtDate(app.submittedAt))
+                  ),
+
+                  isPersonal ? React.createElement(React.Fragment, null,
+                    /* Personal Info */
+                    React.createElement('div', { style:sectionStyle },
+                      sectionHeader('Personal Information'),
+                      fieldRow('Full Name', [d.firstName, d.middleName, d.lastName].filter(Boolean).join(' ')),
+                      fieldRow('Date of Birth', d.dateOfBirth),
+                      fieldRow('Place of Birth', d.placeOfBirth),
+                    ),
+                    /* Tax */
+                    React.createElement('div', { style:sectionStyle },
+                      sectionHeader('Tax Information'),
+                      fieldRow('Has Tax ID?', d.hasTaxId),
+                      fieldRow('TIN', d.taxId),
+                      fieldRow('No TIN Reason', d.noTaxIdReason),
+                      fieldRow('Tax Country', d.taxCountry),
+                    ),
+                    /* Citizenship */
+                    React.createElement('div', { style:sectionStyle },
+                      sectionHeader('Citizenship & Identity'),
+                      fieldRow('Nationality', d.nationality),
+                      fieldRow('Citizenship', d.citizenship),
+                      fieldRow('Passport / ID No', d.passportNo),
+                      fieldRow('Issuing Authority', d.issuingAuthority),
+                      fieldRow('Date of Issue', d.dateOfIssue),
+                      fieldRow('Date of Expiry', d.dateOfExpiry),
+                      fieldRow('Dual Citizenship', d.hasDualCitizenship),
+                      fieldRow('Second Nationality', d.secondNationality),
+                    ),
+                    /* Address */
+                    React.createElement('div', { style:sectionStyle },
+                      sectionHeader('Residential Address'),
+                      fieldRow('Street', d.street),
+                      fieldRow('City', d.city),
+                      fieldRow('State / Region', d.state),
+                      fieldRow('Postal Code', d.zip),
+                      fieldRow('Country', d.country),
+                      d.differentMailing==='Yes' && fieldRow('Mailing Street', d.mailingStreet),
+                      d.differentMailing==='Yes' && fieldRow('Mailing City', d.mailingCity),
+                      d.differentMailing==='Yes' && fieldRow('Mailing Country', d.mailingCountry),
+                    ),
+                    /* Contact */
+                    React.createElement('div', { style:sectionStyle },
+                      sectionHeader('Contact'),
+                      fieldRow('Email', d.email),
+                      fieldRow('Phone', d.phone),
+                      fieldRow('Facebook', d.facebook),
+                      fieldRow('LinkedIn', d.linkedin),
+                      fieldRow('Other', d.other),
+                    )
+                  ) : React.createElement(React.Fragment, null,
+                    /* Business Info */
+                    React.createElement('div', { style:sectionStyle },
+                      sectionHeader('Company Information'),
+                      fieldRow('Legal Name', d.legalName),
+                      fieldRow('Trading Name', d.tradingName),
+                      fieldRow('Country of Incorporation', d.countryOfIncorporation),
+                      fieldRow('Incorporation Date', d.incorporationDate),
+                      fieldRow('Registration Number', d.registrationNumber),
+                    ),
+                    React.createElement('div', { style:sectionStyle },
+                      sectionHeader('Tax Information'),
+                      fieldRow('Has Tax ID?', d.hasTaxId),
+                      fieldRow('TIN', d.taxId),
+                      fieldRow('No TIN Reason', d.noTaxIdReason),
+                    ),
+                    React.createElement('div', { style:sectionStyle },
+                      sectionHeader('Business Profile'),
+                      fieldRow('Business Activities', d.businessActivities),
+                      fieldRow('Years of Operation', d.yearsOfOperation),
+                      fieldRow('Employees', d.numberOfEmployees),
+                      fieldRow('Annual Income', d.annualIncome),
+                      fieldRow('Part of Group?', d.partOfGroup),
+                      fieldRow('Group Details', d.groupDetails),
+                      fieldRow('Regulated?', d.isRegulated),
+                      fieldRow('License Number', d.licenseNumber),
+                      fieldRow('Regulator', d.issuingRegulator),
+                    ),
+                    React.createElement('div', { style:sectionStyle },
+                      sectionHeader('Registered Address'),
+                      fieldRow('Street', d.regStreet),
+                      fieldRow('City', d.regCity),
+                      fieldRow('Country', d.regCountry),
+                    ),
+                    React.createElement('div', { style:sectionStyle },
+                      sectionHeader('Contact'),
+                      fieldRow('Email', d.email),
+                      fieldRow('Phone', d.phone),
+                      fieldRow('Website', d.website),
+                    )
+                  ),
+
+                  /* Documents */
+                  docs.length > 0 && React.createElement('div', { style:sectionStyle },
+                    sectionHeader('Uploaded Documents'),
+                    React.createElement('div', { style:{ display:'flex', gap:8, flexWrap:'wrap', marginTop:6 } },
+                      docs.map((doc, di) =>
+                        React.createElement('a', {
+                          key:di,
+                          href: `/admin/applications/${u.id}/document/${di}`,
+                          target:'_blank',
+                          rel:'noopener noreferrer',
+                          style:{ display:'inline-flex', alignItems:'center', gap:6, background:C.card, border:`1px solid ${C.border}`, borderRadius:7, padding:'7px 14px', fontSize:12, color:C.text, textDecoration:'none', cursor:'pointer' },
+                        },
+                          React.createElement(Icon, { d:Icons.file, size:12, color:C.muted }),
+                          doc.name,
+                          React.createElement('span', { style:{ color:C.muted, fontSize:11 } }, `(${(doc.size/1024).toFixed(0)} KB)`)
+                        )
+                      )
+                    )
+                  )
+                );
+              });
+            })()}
           </div>
         )}
 

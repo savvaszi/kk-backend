@@ -4,17 +4,25 @@
  *   POST /public/apply/personal   – Personal account application
  *   POST /public/apply/business   – Business account application
  *
- * All submissions are emailed to info@krypto-knight.com via SMTP.
- * File uploads (ID docs, address proofs) are attached to the email.
+ * On form submission:
+ *   1. Find existing user by email, or create a pending account with a temp password.
+ *   2. Store the full application (text fields + uploaded files as base64) in the DB.
+ *   3. Set kycStatus = 'pending' on the user.
+ *   4. Email admin notification + welcome email to applicant (new accounts only).
  */
 
 import { Router, Request, Response } from 'express';
+import crypto from 'crypto';
 import multer from 'multer';
+import { db } from '../db/index.js';
+import { users, applications } from '../db/schema.js';
+import { eq } from 'drizzle-orm';
+import { hashPassword } from '../lib/password.js';
 import { transporter, RECIPIENT, FROM } from '../lib/mailer.js';
 
 const router = Router();
 
-// Store uploads in memory so we can attach them directly to the email
+// Store uploads in memory so we can attach them to the email and persist to DB
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB per file
@@ -68,6 +76,80 @@ function toAttachment(file: Express.Multer.File) {
   };
 }
 
+/** Convert multer file to DB document record */
+function toDocumentRecord(file: Express.Multer.File) {
+  return {
+    name: file.originalname,
+    mimetype: file.mimetype,
+    size: file.size,
+    data: file.buffer.toString('base64'),
+  };
+}
+
+/** Generate a random temp password like KK-abc123 */
+function generateTempPassword(): string {
+  return 'KK-' + crypto.randomBytes(4).toString('hex');
+}
+
+/** Derive a username from an email (take part before @, lowercase, strip non-alphanum/underscore) */
+function usernameFromEmail(email: string): string {
+  return email.split('@')[0].toLowerCase().replace(/[^a-z0-9_]/g, '_').slice(0, 30);
+}
+
+/**
+ * Find user by email or create a new pending account.
+ * Returns { user, isNew, tempPassword? }
+ */
+async function findOrCreateUser(email: string, firstName?: string, lastName?: string) {
+  const [existing] = await db
+    .select()
+    .from(users)
+    .where(eq(users.email, email.toLowerCase()))
+    .limit(1);
+
+  if (existing) {
+    // Update kycStatus to pending if not already reviewed
+    if (existing.kycStatus === 'none') {
+      await db
+        .update(users)
+        .set({ kycStatus: 'pending', updatedAt: new Date() })
+        .where(eq(users.id, existing.id));
+    }
+    return { user: { ...existing, kycStatus: 'pending' }, isNew: false };
+  }
+
+  // Create new user
+  const tempPassword = generateTempPassword();
+  const passwordHash = await hashPassword(tempPassword);
+  let username = usernameFromEmail(email);
+
+  // Ensure username uniqueness
+  const [byUsername] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.username, username))
+    .limit(1);
+  if (byUsername) {
+    username = username + '_' + crypto.randomBytes(2).toString('hex');
+  }
+
+  const [user] = await db
+    .insert(users)
+    .values({
+      email: email.toLowerCase(),
+      username,
+      passwordHash,
+      firstName: firstName ?? null,
+      lastName: lastName ?? null,
+      status: 'active',
+      kycStatus: 'pending',
+      emailVerified: false,
+    })
+    .returning();
+
+  return { user, isNew: true, tempPassword };
+}
+
 // ── Contact form ──────────────────────────────────────────────────────────────
 
 router.post('/contact', async (req: Request, res: Response) => {
@@ -114,21 +196,44 @@ router.post('/apply/personal', personalUpload as any, async (req: Request, res: 
     const f = req.body as Record<string, string>;
     const files = req.files as Record<string, Express.Multer.File[]> | undefined;
 
+    if (!f.email) {
+      res.status(400).json({ success: false, error: 'Email is required.' });
+      return;
+    }
+
+    // 1. Find or create user
+    const { user, isNew, tempPassword } = await findOrCreateUser(
+      f.email,
+      f.firstName,
+      f.lastName
+    );
+
+    // 2. Build document records for DB storage
+    const documents: Array<{ name: string; mimetype: string; size: number; data: string }> = [];
+    if (files?.idDocument?.[0]) documents.push(toDocumentRecord(files.idDocument[0]));
+    if (files?.addressProof?.[0]) documents.push(toDocumentRecord(files.addressProof[0]));
+
+    // 3. Store application in DB
+    await db.insert(applications).values({
+      userId: user.id,
+      type: 'personal',
+      data: f,
+      documents,
+    });
+
+    // 4. Build rows for admin email
     const rows: [string, string][] = [
-      // Identity
       ['— PERSONAL INFORMATION —', ''],
       ['First Name', f.firstName ?? ''],
       ['Middle Name', f.middleName ?? ''],
       ['Last Name', f.lastName ?? ''],
       ['Date of Birth', f.dateOfBirth ?? ''],
       ['Place of Birth', f.placeOfBirth ?? ''],
-      // Tax
       ['— TAX INFORMATION —', ''],
       ['Has Tax ID?', f.hasTaxId ?? ''],
       ['Tax Identification Number', f.taxId ?? ''],
       ['Reason (no TIN)', f.noTaxIdReason ?? ''],
       ['Tax Country', f.taxCountry ?? ''],
-      // Citizenship
       ['— CITIZENSHIP —', ''],
       ['Nationality', f.nationality ?? ''],
       ['Citizenship', f.citizenship ?? ''],
@@ -138,7 +243,6 @@ router.post('/apply/personal', personalUpload as any, async (req: Request, res: 
       ['Date of Expiry', f.dateOfExpiry ?? ''],
       ['Dual Citizenship?', f.hasDualCitizenship ?? ''],
       ['Second Nationality', f.secondNationality ?? ''],
-      // Address
       ['— RESIDENTIAL ADDRESS —', ''],
       ['Street', f.street ?? ''],
       ['City', f.city ?? ''],
@@ -151,14 +255,15 @@ router.post('/apply/personal', personalUpload as any, async (req: Request, res: 
       ['Mailing State', f.mailingState ?? ''],
       ['Mailing ZIP', f.mailingZip ?? ''],
       ['Mailing Country', f.mailingCountry ?? ''],
-      // Contact
       ['— CONTACT —', ''],
       ['Phone', f.phone ?? ''],
       ['Email', f.email ?? ''],
       ['Facebook', f.facebook ?? ''],
       ['LinkedIn', f.linkedin ?? ''],
       ['Other Social', f.other ?? ''],
-      // Meta
+      ['— ACCOUNT —', ''],
+      ['User ID', user.id],
+      ['New Account Created', isNew ? 'Yes' : 'No'],
       ['Submitted at', new Date().toUTCString()],
     ];
 
@@ -168,6 +273,7 @@ router.post('/apply/personal', personalUpload as any, async (req: Request, res: 
 
     const name = `${f.firstName ?? ''} ${f.lastName ?? ''}`.trim();
 
+    // 5. Send admin notification
     await transporter.sendMail({
       from: FROM,
       to: RECIPIENT,
@@ -177,9 +283,38 @@ router.post('/apply/personal', personalUpload as any, async (req: Request, res: 
       attachments,
     });
 
+    // 6. Send welcome email to applicant if new account was created
+    if (isNew && tempPassword) {
+      const welcomeRows: [string, string][] = [
+        ['Your Email', f.email],
+        ['Your Username', user.username],
+        ['Temporary Password', tempPassword],
+      ];
+      await transporter.sendMail({
+        from: FROM,
+        to: f.email,
+        subject: 'Your Krypto Knight Application Has Been Received',
+        html: emailWrapper(
+          'Application Received',
+          `<p style="font-family:sans-serif;font-size:14px;color:#333;margin-bottom:20px">
+            Thank you, ${name || 'Applicant'}. Your personal account application has been received and is now under review.
+            Our team will verify your documents and contact you within 1–3 business days.
+          </p>
+          <p style="font-family:sans-serif;font-size:14px;color:#333;margin-bottom:12px">
+            A platform account has been created for you with the credentials below.
+            Please change your password after your first login.
+          </p>
+          ${htmlTable(welcomeRows)}
+          <p style="font-family:sans-serif;font-size:12px;color:#999;margin-top:20px">
+            Login at: <a href="https://krypto-knight.com/login">krypto-knight.com/login</a>
+          </p>`
+        ),
+      });
+    }
+
     res.json({ success: true });
   } catch (err: any) {
-    console.error('[apply/personal] mail error:', err?.message);
+    console.error('[apply/personal] error:', err?.message);
     res.status(500).json({ success: false, error: 'Failed to submit application. Please try again.' });
   }
 });
@@ -197,9 +332,32 @@ router.post('/apply/business', businessUpload as any, async (req: Request, res: 
     const f = req.body as Record<string, string>;
     const files = req.files as Record<string, Express.Multer.File[]> | undefined;
 
+    if (!f.email) {
+      res.status(400).json({ success: false, error: 'Email is required.' });
+      return;
+    }
+
+    // 1. Find or create user
+    const { user, isNew, tempPassword } = await findOrCreateUser(f.email);
+
+    // 2. Build document records for DB storage
+    const documents: Array<{ name: string; mimetype: string; size: number; data: string }> = [];
+    if (files?.incorporationDoc?.[0]) documents.push(toDocumentRecord(files.incorporationDoc[0]));
+    if (files?.additionalDoc?.[0]) documents.push(toDocumentRecord(files.additionalDoc[0]));
+    if (files?.addressProof?.[0]) documents.push(toDocumentRecord(files.addressProof[0]));
+
+    // 3. Store application in DB
+    await db.insert(applications).values({
+      userId: user.id,
+      type: 'business',
+      data: f,
+      documents,
+    });
+
+    // 4. Build rows for admin email
     const rows: [string, string][] = [
       ['— COMPANY INFORMATION —', ''],
-      ["Legal Name", f.legalName ?? ''],
+      ['Legal Name', f.legalName ?? ''],
       ['Trading Name', f.tradingName ?? ''],
       ['Country of Incorporation', f.countryOfIncorporation ?? ''],
       ['Incorporation Date', f.incorporationDate ?? ''],
@@ -234,6 +392,9 @@ router.post('/apply/business', businessUpload as any, async (req: Request, res: 
       ['Phone', f.phone ?? ''],
       ['Email', f.email ?? ''],
       ['Website', f.website ?? ''],
+      ['— ACCOUNT —', ''],
+      ['User ID', user.id],
+      ['New Account Created', isNew ? 'Yes' : 'No'],
       ['Submitted at', new Date().toUTCString()],
     ];
 
@@ -242,6 +403,7 @@ router.post('/apply/business', businessUpload as any, async (req: Request, res: 
     if (files?.additionalDoc?.[0]) attachments.push(toAttachment(files.additionalDoc[0]));
     if (files?.addressProof?.[0]) attachments.push(toAttachment(files.addressProof[0]));
 
+    // 5. Send admin notification
     await transporter.sendMail({
       from: FROM,
       to: RECIPIENT,
@@ -251,9 +413,38 @@ router.post('/apply/business', businessUpload as any, async (req: Request, res: 
       attachments,
     });
 
+    // 6. Send welcome email to applicant if new account was created
+    if (isNew && tempPassword) {
+      const welcomeRows: [string, string][] = [
+        ['Your Email', f.email],
+        ['Your Username', user.username],
+        ['Temporary Password', tempPassword],
+      ];
+      await transporter.sendMail({
+        from: FROM,
+        to: f.email,
+        subject: 'Your Krypto Knight Application Has Been Received',
+        html: emailWrapper(
+          'Application Received',
+          `<p style="font-family:sans-serif;font-size:14px;color:#333;margin-bottom:20px">
+            Thank you for submitting your business account application. Our team will review your
+            documents and contact you within 1–3 business days.
+          </p>
+          <p style="font-family:sans-serif;font-size:14px;color:#333;margin-bottom:12px">
+            A platform account has been created for you with the credentials below.
+            Please change your password after your first login.
+          </p>
+          ${htmlTable(welcomeRows)}
+          <p style="font-family:sans-serif;font-size:12px;color:#999;margin-top:20px">
+            Login at: <a href="https://krypto-knight.com/login">krypto-knight.com/login</a>
+          </p>`
+        ),
+      });
+    }
+
     res.json({ success: true });
   } catch (err: any) {
-    console.error('[apply/business] mail error:', err?.message);
+    console.error('[apply/business] error:', err?.message);
     res.status(500).json({ success: false, error: 'Failed to submit application. Please try again.' });
   }
 });

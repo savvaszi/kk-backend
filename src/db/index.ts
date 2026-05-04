@@ -203,6 +203,17 @@ export async function initDb() {
     )
   `;
 
+  await sql`
+    CREATE TABLE IF NOT EXISTS applications (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+      type VARCHAR(20) NOT NULL,
+      data JSONB NOT NULL,
+      documents JSONB NOT NULL DEFAULT '[]',
+      submitted_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+    )
+  `;
+
   // Safe column migrations
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS fireblocks_vault_id VARCHAR(100)`;
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS sumsub_applicant_id VARCHAR(100)`;

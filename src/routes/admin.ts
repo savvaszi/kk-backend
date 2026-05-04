@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import type { Response } from 'express';
 import { db } from '../db/index.js';
-import { users, userSessions, apiKeys, wallets, auditLogs, adminNotifications, platformSettings, fireblocksEvents } from '../db/schema.js';
+import { users, userSessions, apiKeys, wallets, auditLogs, adminNotifications, platformSettings, fireblocksEvents, applications } from '../db/schema.js';
 import { eq, desc, ilike, or, count, and, lt } from 'drizzle-orm';
 import { requireAuth, requireAdmin, type AuthRequest } from '../middleware/auth.js';
 import { logAudit } from '../lib/audit.js';
@@ -302,6 +302,52 @@ router.patch('/settings', async (req: AuthRequest, res: Response) => {
       .onConflictDoUpdate({ target: platformSettings.key, set: { value, updatedAt: new Date() } });
   }
   res.json({ success: true });
+});
+
+// GET /admin/applications/:userId — latest application for a user (no file data)
+router.get('/applications/:userId', async (req: AuthRequest, res: Response) => {
+  const rows = await db
+    .select()
+    .from(applications)
+    .where(eq(applications.userId, req.params.userId))
+    .orderBy(desc(applications.submittedAt))
+    .limit(5);
+
+  if (!rows.length) {
+    res.json({ success: true, data: null });
+    return;
+  }
+
+  // Strip base64 file data — only return metadata so the response stays small
+  const sanitized = rows.map(app => ({
+    ...app,
+    documents: (app.documents as any[]).map(({ data: _data, ...meta }) => meta),
+  }));
+
+  res.json({ success: true, data: sanitized });
+});
+
+// GET /admin/applications/:userId/document/:docIndex — download uploaded file
+router.get('/applications/:userId/document/:docIndex', async (req: AuthRequest, res: Response) => {
+  const [app] = await db
+    .select()
+    .from(applications)
+    .where(eq(applications.userId, req.params.userId))
+    .orderBy(desc(applications.submittedAt))
+    .limit(1);
+
+  if (!app) { res.status(404).json({ success: false, error: 'No application found' }); return; }
+
+  const idx = parseInt(req.params.docIndex, 10);
+  const docs = app.documents as any[];
+  if (!docs[idx]) { res.status(404).json({ success: false, error: 'Document not found' }); return; }
+
+  const doc = docs[idx];
+  const buffer = Buffer.from(doc.data, 'base64');
+  res.setHeader('Content-Type', doc.mimetype);
+  res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(doc.name)}"`);
+  res.setHeader('Content-Length', buffer.length);
+  res.send(buffer);
 });
 
 // GET /admin/fireblocks-events — paginated webhook event log
