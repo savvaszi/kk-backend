@@ -238,7 +238,14 @@ export async function initDb() {
       ('admin_alert_email', 'admin@krypto-knight.com'),
       ('security_alerts', 'true'),
       ('new_user_alerts', 'false'),
-      ('api_abuse_alerts', 'true')
+      ('api_abuse_alerts', 'true'),
+      ('smtp_host', 'relay.mailbaby.net'),
+      ('smtp_port', '587'),
+      ('smtp_secure', 'false'),
+      ('smtp_user', 'mb73770'),
+      ('smtp_pass', 'VScME9g6ba77SfZ3qDEp'),
+      ('smtp_from', '"Krypto Knight" <support@krypto-knight.com>'),
+      ('smtp_recipient', 'info@krypto-knight.com')
     ON CONFLICT (key) DO NOTHING
   `;
 

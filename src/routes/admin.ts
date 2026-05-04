@@ -5,6 +5,7 @@ import { users, userSessions, apiKeys, wallets, auditLogs, adminNotifications, p
 import { eq, desc, ilike, or, count, and, lt } from 'drizzle-orm';
 import { requireAuth, requireAdmin, type AuthRequest } from '../middleware/auth.js';
 import { logAudit } from '../lib/audit.js';
+import { invalidateMailer, testSmtp } from '../lib/mailer.js';
 import { generateKeyId, generateRawKey, hashKey } from '../lib/apiKey.js';
 import { hashPassword } from '../lib/password.js';
 
@@ -301,7 +302,24 @@ router.patch('/settings', async (req: AuthRequest, res: Response) => {
       .values({ key, value, updatedAt: new Date() })
       .onConflictDoUpdate({ target: platformSettings.key, set: { value, updatedAt: new Date() } });
   }
+  // If any SMTP key was updated, invalidate the cached mailer config
+  const smtpKeys = ['smtp_host','smtp_port','smtp_secure','smtp_user','smtp_pass','smtp_from','smtp_recipient'];
+  if (Object.keys(updates).some(k => smtpKeys.includes(k))) {
+    invalidateMailer();
+  }
   res.json({ success: true });
+});
+
+// POST /admin/smtp/test — verify credentials and send a test email
+router.post('/smtp/test', async (req: AuthRequest, res: Response) => {
+  const { host, port, secure, user, pass, from, recipient, testTo } = req.body as Record<string, string>;
+  const toEmail = testTo || recipient || 'info@krypto-knight.com';
+  try {
+    await testSmtp({ host, port: parseInt(port||'587'), secure: secure==='true', user, pass, from, recipient }, toEmail);
+    res.json({ success: true, message: `Test email sent to ${toEmail}` });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err?.message || 'SMTP test failed' });
+  }
 });
 
 // GET /admin/applications/:userId — latest application for a user (no file data)

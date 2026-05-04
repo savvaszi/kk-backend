@@ -18,7 +18,7 @@ import { db } from '../db/index.js';
 import { users, applications } from '../db/schema.js';
 import { eq } from 'drizzle-orm';
 import { hashPassword } from '../lib/password.js';
-import { transporter, RECIPIENT, FROM } from '../lib/mailer.js';
+import { sendMail, getRecipient } from '../lib/mailer.js';
 
 const router = Router();
 
@@ -169,9 +169,8 @@ router.post('/contact', async (req: Request, res: Response) => {
       ['Submitted at', new Date().toUTCString()],
     ];
 
-    await transporter.sendMail({
-      from: FROM,
-      to: RECIPIENT,
+    await sendMail({
+      to: await getRecipient(),
       replyTo: email,
       subject: `Contact Form: ${subject || 'New message'} — ${firstName ?? ''} ${lastName ?? ''}`.trim(),
       html: emailWrapper('New Contact Form Submission', htmlTable(rows)),
@@ -274,9 +273,8 @@ router.post('/apply/personal', personalUpload as any, async (req: Request, res: 
     const name = `${f.firstName ?? ''} ${f.lastName ?? ''}`.trim();
 
     // 5. Send admin notification
-    await transporter.sendMail({
-      from: FROM,
-      to: RECIPIENT,
+    await sendMail({
+      to: await getRecipient(),
       replyTo: f.email || undefined,
       subject: `Personal Account Application — ${name}`,
       html: emailWrapper('Personal Account Application', htmlTable(rows)),
@@ -290,8 +288,7 @@ router.post('/apply/personal', personalUpload as any, async (req: Request, res: 
         ['Your Username', user.username],
         ['Temporary Password', tempPassword],
       ];
-      await transporter.sendMail({
-        from: FROM,
+      await sendMail({
         to: f.email,
         subject: 'Your Krypto Knight Application Has Been Received',
         html: emailWrapper(
@@ -404,9 +401,8 @@ router.post('/apply/business', businessUpload as any, async (req: Request, res: 
     if (files?.addressProof?.[0]) attachments.push(toAttachment(files.addressProof[0]));
 
     // 5. Send admin notification
-    await transporter.sendMail({
-      from: FROM,
-      to: RECIPIENT,
+    await sendMail({
+      to: await getRecipient(),
       replyTo: f.email || undefined,
       subject: `Business Account Application — ${f.legalName ?? 'Unknown Company'}`,
       html: emailWrapper('Business Account Application', htmlTable(rows)),
@@ -420,8 +416,7 @@ router.post('/apply/business', businessUpload as any, async (req: Request, res: 
         ['Your Username', user.username],
         ['Temporary Password', tempPassword],
       ];
-      await transporter.sendMail({
-        from: FROM,
+      await sendMail({
         to: f.email,
         subject: 'Your Krypto Knight Application Has Been Received',
         html: emailWrapper(

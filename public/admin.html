@@ -1023,6 +1023,10 @@ const PageNotifications = ({ notifications, reload }) => {
 const PageSettings = ({ settings, reload }) => {
   const [local, setLocal] = useState(settings);
   const [saved, setSaved] = useState(false);
+  const [showPass, setShowPass] = useState(false);
+  const [testTo, setTestTo] = useState('');
+  const [testing, setTesting] = useState(false);
+  const [testMsg, setTestMsg] = useState(null); // {ok, text}
   useEffect(()=>setLocal(settings),[settings]);
 
   const save = async () => {
@@ -1033,6 +1037,18 @@ const PageSettings = ({ settings, reload }) => {
   };
   const toggle = (key) => setLocal(p=>({ ...p, [key]: p[key]==='true'?'false':'true' }));
   const set = (key, val) => setLocal(p=>({ ...p, [key]: val }));
+
+  const testSmtp = async () => {
+    setTesting(true); setTestMsg(null);
+    const body = {
+      host: local.smtp_host, port: local.smtp_port, secure: local.smtp_secure,
+      user: local.smtp_user, pass: local.smtp_pass, from: local.smtp_from,
+      recipient: local.smtp_recipient, testTo: testTo||local.smtp_recipient,
+    };
+    const r = await api('/admin/smtp/test', { method:'POST', body:JSON.stringify(body) });
+    setTestMsg(r.success ? { ok:true, text: r.message||'Test email sent!' } : { ok:false, text: r.error||'Test failed' });
+    setTesting(false);
+  };
 
   const sections = [
     { title:'General', icon:'settings', fields:[
@@ -1055,10 +1071,14 @@ const PageSettings = ({ settings, reload }) => {
     ]},
   ];
 
+  const inputStyle = { background:C.card2, border:`1px solid ${C.border}`, borderRadius:8, padding:'8px 14px', color:C.text, fontSize:13, outline:'none', width:260 };
+  const rowStyle = { display:'flex', alignItems:'center', justifyContent:'space-between', padding:'12px 0', borderTop:`1px solid ${C.border}` };
+
   return (
     <div style={{ padding:'28px 32px', overflowY:'auto', height:'100%' }}>
       <div style={{ fontSize:22, fontWeight:700, marginBottom:4 }}>Platform Settings</div>
       <div style={{ fontSize:13, color:C.muted, marginBottom:28 }}>Configure global platform behavior</div>
+
       {sections.map(s=>(
         <div key={s.title} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:24, marginBottom:18 }}>
           <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:20 }}>
@@ -1066,20 +1086,105 @@ const PageSettings = ({ settings, reload }) => {
             <div style={{ fontWeight:600, fontSize:14 }}>{s.title}</div>
           </div>
           {s.fields.map(f=>(
-            <div key={f.key} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'12px 0', borderTop:`1px solid ${C.border}` }}>
+            <div key={f.key} style={rowStyle}>
               <label style={{ fontSize:13 }}>{f.label}</label>
               {f.type==='toggle'
                 ? <div onClick={()=>toggle(f.key)} style={{ width:44, height:24, borderRadius:12, background:local[f.key]==='true'?C.orange:C.border2, cursor:'pointer', position:'relative', transition:'background .2s' }}>
                     <div style={{ position:'absolute', width:18, height:18, borderRadius:'50%', background:'#fff', top:3, left:local[f.key]==='true'?23:3, transition:'left .2s' }}/>
                   </div>
-                : <input value={local[f.key]||''} onChange={e=>set(f.key,e.target.value)} style={{ background:C.card2, border:`1px solid ${C.border}`, borderRadius:8, padding:'8px 14px', color:C.text, fontSize:13, outline:'none', width:260 }}/>
+                : <input value={local[f.key]||''} onChange={e=>set(f.key,e.target.value)} style={inputStyle}/>
               }
             </div>
           ))}
         </div>
       ))}
+
+      {/* ── SMTP Settings Card ── */}
+      <div style={{ background:C.card, border:`1px solid ${C.blue}40`, borderRadius:12, padding:24, marginBottom:18 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:20 }}>
+          <div style={{ background:`${C.blue}18`, borderRadius:8, padding:8 }}><Icon d={Icons.send} size={15} color={C.blue} stroke/></div>
+          <div style={{ fontWeight:600, fontSize:14 }}>SMTP / Email Settings</div>
+          <span style={{ marginLeft:'auto', fontSize:11, color:C.muted }}>Used for all outbound emails (applications, alerts, welcome emails)</span>
+        </div>
+
+        {/* SMTP Host + Port */}
+        <div style={rowStyle}>
+          <label style={{ fontSize:13 }}>SMTP Host</label>
+          <input value={local.smtp_host||''} onChange={e=>set('smtp_host',e.target.value)} placeholder="relay.mailbaby.net" style={inputStyle}/>
+        </div>
+        <div style={rowStyle}>
+          <label style={{ fontSize:13 }}>SMTP Port</label>
+          <div style={{ display:'flex', gap:6, alignItems:'center' }}>
+            {['25','587','2525','465'].map(p=>(
+              <button key={p} onClick={()=>set('smtp_port',p)} style={{ padding:'5px 10px', borderRadius:6, border:`1px solid ${local.smtp_port===p?C.blue:C.border}`, background:local.smtp_port===p?`${C.blue}22`:'transparent', color:local.smtp_port===p?C.blue:C.muted, fontSize:12, cursor:'pointer' }}>{p}</button>
+            ))}
+            <input value={local.smtp_port||'587'} onChange={e=>set('smtp_port',e.target.value)} style={{ ...inputStyle, width:80, textAlign:'center' }}/>
+          </div>
+        </div>
+        <div style={rowStyle}>
+          <div>
+            <label style={{ fontSize:13 }}>Use SSL/TLS (Secure)</label>
+            <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>Enable for port 465. Leave off for 25/587/2525 (STARTTLS)</div>
+          </div>
+          <div onClick={()=>toggle('smtp_secure')} style={{ width:44, height:24, borderRadius:12, background:local.smtp_secure==='true'?C.blue:C.border2, cursor:'pointer', position:'relative', transition:'background .2s' }}>
+            <div style={{ position:'absolute', width:18, height:18, borderRadius:'50%', background:'#fff', top:3, left:local.smtp_secure==='true'?23:3, transition:'left .2s' }}/>
+          </div>
+        </div>
+
+        {/* Credentials */}
+        <div style={{ marginTop:8, paddingTop:8, borderTop:`1px solid ${C.border}40`, marginBottom:0 }}>
+          <div style={{ fontSize:11, color:C.muted, fontWeight:600, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:4, paddingTop:8 }}>Authentication</div>
+        </div>
+        <div style={rowStyle}>
+          <label style={{ fontSize:13 }}>Username</label>
+          <input value={local.smtp_user||''} onChange={e=>set('smtp_user',e.target.value)} placeholder="mb73770" style={inputStyle}/>
+        </div>
+        <div style={rowStyle}>
+          <label style={{ fontSize:13 }}>Password</label>
+          <div style={{ display:'flex', gap:6, alignItems:'center' }}>
+            <input type={showPass?'text':'password'} value={local.smtp_pass||''} onChange={e=>set('smtp_pass',e.target.value)} style={inputStyle}/>
+            <button onClick={()=>setShowPass(p=>!p)} style={{ padding:'8px 10px', borderRadius:8, border:`1px solid ${C.border}`, background:'transparent', color:C.muted, fontSize:11, cursor:'pointer', whiteSpace:'nowrap' }}>
+              {showPass ? 'Hide' : 'Show'}
+            </button>
+          </div>
+        </div>
+
+        {/* From / Recipient */}
+        <div style={{ marginTop:8, paddingTop:8, borderTop:`1px solid ${C.border}40` }}>
+          <div style={{ fontSize:11, color:C.muted, fontWeight:600, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:4, paddingTop:8 }}>Addresses</div>
+        </div>
+        <div style={rowStyle}>
+          <div>
+            <label style={{ fontSize:13 }}>From Address</label>
+            <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>Appears in the From field of all sent emails</div>
+          </div>
+          <input value={local.smtp_from||''} onChange={e=>set('smtp_from',e.target.value)} placeholder='"Krypto Knight" <support@krypto-knight.com>' style={{ ...inputStyle, width:320 }}/>
+        </div>
+        <div style={rowStyle}>
+          <div>
+            <label style={{ fontSize:13 }}>Admin Recipient</label>
+            <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>Where application / contact form notifications are delivered</div>
+          </div>
+          <input value={local.smtp_recipient||''} onChange={e=>set('smtp_recipient',e.target.value)} placeholder="info@krypto-knight.com" style={{ ...inputStyle, width:320 }}/>
+        </div>
+
+        {/* Test Connection */}
+        <div style={{ marginTop:18, paddingTop:16, borderTop:`1px solid ${C.border}`, display:'flex', gap:10, alignItems:'center', flexWrap:'wrap' }}>
+          <div style={{ fontWeight:600, fontSize:13 }}>Test Connection</div>
+          <input value={testTo} onChange={e=>setTestTo(e.target.value)} placeholder={local.smtp_recipient||'Send test to…'} style={{ ...inputStyle, width:240 }}/>
+          <Btn variant="ghost" size="sm" onClick={testSmtp} disabled={testing}>
+            {testing ? 'Sending…' : '⚡ Send Test Email'}
+          </Btn>
+          {testMsg && (
+            <span style={{ fontSize:13, color: testMsg.ok ? C.green : C.red, display:'flex', alignItems:'center', gap:4 }}>
+              {testMsg.ok ? '✓' : '✗'} {testMsg.text}
+            </span>
+          )}
+        </div>
+      </div>
+
       <div style={{ display:'flex', gap:12 }}>
-        <Btn size="md" onClick={save}>{saved?'✓ Saved!':'Save Changes'}</Btn>
+        <Btn size="md" onClick={save}>{saved?'✓ Saved!':'Save All Settings'}</Btn>
         <Btn variant="ghost" size="md" onClick={()=>setLocal(settings)}>Reset</Btn>
       </div>
     </div>
