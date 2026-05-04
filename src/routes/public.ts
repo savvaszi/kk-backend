@@ -272,23 +272,23 @@ router.post('/apply/personal', personalUpload as any, async (req: Request, res: 
 
     const name = `${f.firstName ?? ''} ${f.lastName ?? ''}`.trim();
 
-    // 5. Send admin notification
-    await sendMail({
+    // 5. Send admin notification (non-blocking — email failure must not fail the submission)
+    sendMail({
       to: await getRecipient(),
       replyTo: f.email || undefined,
       subject: `Personal Account Application — ${name}`,
       html: emailWrapper('Personal Account Application', htmlTable(rows)),
       attachments,
-    });
+    }).catch(err => console.error('[apply/personal] admin email error:', err?.message));
 
-    // 6. Send welcome email to applicant if new account was created
+    // 6. Send welcome email to applicant if new account was created (non-blocking)
     if (isNew && tempPassword) {
       const welcomeRows: [string, string][] = [
         ['Your Email', f.email],
         ['Your Username', user.username],
         ['Temporary Password', tempPassword],
       ];
-      await sendMail({
+      sendMail({
         to: f.email,
         subject: 'Your Krypto Knight Application Has Been Received',
         html: emailWrapper(
@@ -306,7 +306,7 @@ router.post('/apply/personal', personalUpload as any, async (req: Request, res: 
             Login at: <a href="https://krypto-knight.com/login">krypto-knight.com/login</a>
           </p>`
         ),
-      });
+      }).catch(err => console.error('[apply/personal] welcome email error:', err?.message));
     }
 
     res.json({ success: true });
@@ -400,23 +400,23 @@ router.post('/apply/business', businessUpload as any, async (req: Request, res: 
     if (files?.additionalDoc?.[0]) attachments.push(toAttachment(files.additionalDoc[0]));
     if (files?.addressProof?.[0]) attachments.push(toAttachment(files.addressProof[0]));
 
-    // 5. Send admin notification
-    await sendMail({
+    // 5. Send admin notification (non-blocking — email failure must not fail the submission)
+    sendMail({
       to: await getRecipient(),
       replyTo: f.email || undefined,
       subject: `Business Account Application — ${f.legalName ?? 'Unknown Company'}`,
       html: emailWrapper('Business Account Application', htmlTable(rows)),
       attachments,
-    });
+    }).catch(err => console.error('[apply/business] admin email error:', err?.message));
 
-    // 6. Send welcome email to applicant if new account was created
+    // 6. Send welcome email to applicant if new account was created (non-blocking)
     if (isNew && tempPassword) {
       const welcomeRows: [string, string][] = [
         ['Your Email', f.email],
         ['Your Username', user.username],
         ['Temporary Password', tempPassword],
       ];
-      await sendMail({
+      sendMail({
         to: f.email,
         subject: 'Your Krypto Knight Application Has Been Received',
         html: emailWrapper(
@@ -434,7 +434,7 @@ router.post('/apply/business', businessUpload as any, async (req: Request, res: 
             Login at: <a href="https://krypto-knight.com/login">krypto-knight.com/login</a>
           </p>`
         ),
-      });
+      }).catch(err => console.error('[apply/business] welcome email error:', err?.message));
     }
 
     res.json({ success: true });
