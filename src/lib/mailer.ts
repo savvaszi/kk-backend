@@ -20,15 +20,16 @@ interface SmtpConfig {
   recipient: string;
 }
 
-// Default / fallback credentials (mailbaby relay)
+// Default / fallback credentials — read from environment variables.
+// Never hard-code credentials here; set SMTP_* vars in your deployment env.
 const DEFAULTS: SmtpConfig = {
-  host:      'relay.mailbaby.net',
-  port:      587,
-  secure:    false,
-  user:      'mb73770',
-  pass:      'VScME9g6ba77SfZ3qDEp',
-  from:      '"Krypto Knight" <support@krypto-knight.com>',
-  recipient: 'info@krypto-knight.com',
+  host:      process.env.SMTP_HOST      || 'relay.mailbaby.net',
+  port:      parseInt(process.env.SMTP_PORT || '587', 10),
+  secure:    (process.env.SMTP_SECURE   || 'false') === 'true',
+  user:      process.env.SMTP_USER      || '',
+  pass:      process.env.SMTP_PASS      || '',
+  from:      process.env.SMTP_FROM      || '"Krypto Knight" <support@krypto-knight.com>',
+  recipient: process.env.SMTP_RECIPIENT || 'info@krypto-knight.com',
 };
 
 let _config: SmtpConfig | null = null;

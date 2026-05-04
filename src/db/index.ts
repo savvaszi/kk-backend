@@ -239,13 +239,13 @@ export async function initDb() {
       ('security_alerts', 'true'),
       ('new_user_alerts', 'false'),
       ('api_abuse_alerts', 'true'),
-      ('smtp_host', 'relay.mailbaby.net'),
-      ('smtp_port', '587'),
-      ('smtp_secure', 'false'),
-      ('smtp_user', 'mb73770'),
-      ('smtp_pass', 'VScME9g6ba77SfZ3qDEp'),
-      ('smtp_from', '"Krypto Knight" <support@krypto-knight.com>'),
-      ('smtp_recipient', 'info@krypto-knight.com')
+      ('smtp_host', ${process.env.SMTP_HOST || 'relay.mailbaby.net'}),
+      ('smtp_port', ${process.env.SMTP_PORT || '587'}),
+      ('smtp_secure', ${process.env.SMTP_SECURE || 'false'}),
+      ('smtp_user', ${process.env.SMTP_USER || ''}),
+      ('smtp_pass', ${process.env.SMTP_PASS || ''}),
+      ('smtp_from', ${process.env.SMTP_FROM || '"Krypto Knight" <support@krypto-knight.com>'}),
+      ('smtp_recipient', ${process.env.SMTP_RECIPIENT || 'info@krypto-knight.com'})
     ON CONFLICT (key) DO NOTHING
   `;
 
