@@ -8,6 +8,7 @@ import { signToken, verifyToken, tokenExpiresAt } from '../lib/jwt.js';
 import { logAudit } from '../lib/audit.js';
 import { requireAuth, type AuthRequest } from '../middleware/auth.js';
 import crypto from 'crypto';
+import { sendMail } from '../lib/mailer.js';
 
 const router = Router();
 
@@ -177,8 +178,8 @@ router.post('/check-availability', async (req: Request, res: Response) => {
 });
 
 // ── POST /auth/forgot-password ────────────────────────────────────────────────
-// Generate a password-reset token. In production this token would be emailed;
-// here we return it in the response (remove in production, send via email).
+// Generate a password-reset token and send it via email only.
+// The token is NEVER returned in the API response.
 router.post('/forgot-password', async (req: Request, res: Response) => {
   const { email } = req.body;
   if (!email) { res.status(400).json({ success: false, error: 'email is required' }); return; }
@@ -186,9 +187,11 @@ router.post('/forgot-password', async (req: Request, res: Response) => {
   const [user] = await db.select({ id: users.id, email: users.email }).from(users)
     .where(eq(users.email, email.toLowerCase())).limit(1);
 
-  // Always return 200 to avoid email enumeration
+  // Always return the same response to avoid email enumeration
+  const genericResponse = { success: true, message: 'If that email is registered, a reset link has been sent.' };
+
   if (!user) {
-    res.json({ success: true, message: 'If that email is registered, a reset link has been sent.' });
+    res.json(genericResponse);
     return;
   }
 
@@ -204,12 +207,23 @@ router.post('/forgot-password', async (req: Request, res: Response) => {
 
   await logAudit({ userId: user.id, userName: user.email, action: 'Password Reset Requested', type: 'security', severity: 'warning' });
 
-  // TODO: send rawToken via email. Returned here for development only.
-  res.json({
-    success: true,
-    message: 'Password reset token generated.',
-    data: { resetToken: rawToken, expiresAt },
-  });
+  // Send reset link via email only — never expose the token in the response
+  const resetLink = `https://krypto-knight.com/reset-password?token=${rawToken}`;
+  sendMail({
+    to: user.email,
+    subject: 'Krypto Knight — Password Reset Request',
+    html: `
+      <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:32px">
+        <h2 style="color:#0d1117">Password Reset</h2>
+        <p>We received a request to reset the password for your Krypto Knight account.</p>
+        <p>Click the button below to set a new password. This link expires in <strong>1 hour</strong>.</p>
+        <a href="${resetLink}" style="display:inline-block;margin:20px 0;padding:12px 24px;background:#00FF9C;color:#000;font-weight:700;text-decoration:none;border-radius:6px">Reset Password</a>
+        <p style="color:#666;font-size:12px">If you did not request this, you can safely ignore this email. Your password will not change.</p>
+        <p style="color:#666;font-size:12px">Link: ${resetLink}</p>
+      </div>`,
+  }).catch(err => console.error('[forgot-password] email error:', err?.message));
+
+  res.json(genericResponse);
 });
 
 // ── POST /auth/reset-password ─────────────────────────────────────────────────
