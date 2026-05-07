@@ -28,12 +28,24 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = parseInt(process.env.PORT ?? '4000', 10);
 
+const ALLOWED_ORIGINS_DEFAULT = [
+  'https://krypto-knight.com',
+  'https://k2.krypto-knight.com',
+  'https://k1.krypto-knight.com',
+];
 const origins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
-  : true;
+  : ALLOWED_ORIGINS_DEFAULT;
 
-app.use(helmet({ contentSecurityPolicy: false }));
-app.use(cors({ origin: origins, credentials: true }));
+app.use(helmet({
+  contentSecurityPolicy: false,
+  hsts: {
+    maxAge: 31536000,       // 365 days (KK-03 fix)
+    includeSubDomains: true,
+    preload: true,
+  },
+}));
+app.use(cors({ origin: origins, credentials: true })); // KK-05: explicit allowlist
 
 // ── Webhooks (raw body — MUST be before express.json()) ──────────────────────
 // Fireblocks: RSA-SHA512 signature over raw body (fireblocks-signature header)
