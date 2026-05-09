@@ -21,6 +21,7 @@ import { users, adminNotifications } from '../db/schema.js';
 import { eq } from 'drizzle-orm';
 import { logAudit } from '../lib/audit.js';
 import { verifyWebhookSignature } from '../services/sumsub.js';
+import { sendSecurityAlert } from '../lib/security-alert.js';
 
 const router = Router();
 
@@ -36,6 +37,13 @@ router.post('/', express.raw({ type: '*/*', limit: '1mb' }), async (req: Request
   const sigValid = verifyWebhookSignature(rawBody, signature);
   if (!sigValid) {
     console.warn('[Sumsub Webhook] Invalid signature — ignoring payload');
+    sendSecurityAlert({
+      code: 'WEBHOOK_SIG_FAIL_SUMSUB',
+      level: 'critical',
+      ip: (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim() ?? req.ip,
+      path: req.path,
+      detail: `Sumsub webhook received with invalid HMAC-SHA256 signature. Header: x-payload-digest=${signature ? signature.slice(0, 16) + '…' : 'missing'}`,
+    }).catch(() => {});
     return;
   }
 

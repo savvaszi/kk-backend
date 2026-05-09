@@ -22,6 +22,7 @@ import watchlistRouter from './routes/watchlist.js';
 import ordersRouter from './routes/orders.js';
 import swapsRouter from './routes/swaps.js';
 import transfersRouter from './routes/transfers.js';
+import { sendSecurityAlert } from './lib/security-alert.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -63,6 +64,16 @@ const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, error: 'Too many requests, please try again later.' },
+  handler: (req, res, next, options) => {
+    sendSecurityAlert({
+      code: 'RATE_LIMIT_AUTH',
+      level: 'critical',
+      ip: (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim() ?? req.ip,
+      path: req.path,
+      detail: `Auth rate limit hit: ${options.max} requests / ${options.windowMs / 60000} min`,
+    }).catch(() => {});
+    res.status(options.statusCode).json(options.message);
+  },
 });
 
 // Relaxed limit for general API usage
@@ -72,6 +83,16 @@ const apiLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, error: 'Too many requests, please try again later.' },
+  handler: (req, res, next, options) => {
+    sendSecurityAlert({
+      code: 'RATE_LIMIT_API',
+      level: 'warning',
+      ip: (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim() ?? req.ip,
+      path: req.path,
+      detail: `API rate limit hit: ${options.max} requests / ${options.windowMs / 1000} sec`,
+    }).catch(() => {});
+    res.status(options.statusCode).json(options.message);
+  },
 });
 app.use(express.static(path.join(__dirname, '..', 'public')));
 

@@ -21,6 +21,7 @@ import { db } from '../db/index.js';
 import { users, fireblocksEvents, adminNotifications } from '../db/schema.js';
 import { eq } from 'drizzle-orm';
 import { logAudit } from '../lib/audit.js';
+import { sendSecurityAlert } from '../lib/security-alert.js';
 
 const router = Router();
 
@@ -108,7 +109,14 @@ router.post(
     // 1. Verify signature
     const sigValid = verifySignature(rawBody, signature);
     if (!sigValid) {
-      console.warn('[Webhook] Invalid signature — event stored but flagged');
+      console.warn('[Webhook] Invalid Fireblocks signature — event stored but flagged');
+      sendSecurityAlert({
+        code: 'WEBHOOK_SIG_FAIL_FIREBLOCKS',
+        level: 'critical',
+        ip: (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim() ?? req.ip,
+        path: req.path,
+        detail: `Fireblocks webhook received with invalid RSA-SHA512 signature. Header: fireblocks-signature=${signature ? signature.slice(0, 16) + '…' : 'missing'}`,
+      }).catch(() => {});
     }
 
     // 2. Parse body
