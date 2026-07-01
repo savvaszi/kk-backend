@@ -29,6 +29,11 @@ export const users = pgTable('users', {
   smsNotifications: boolean('sms_notifications').default(false).notNull(),
   pushNotifications: boolean('push_notifications').default(false).notNull(),
   isAdmin: boolean('is_admin').default(false).notNull(),
+  // 'full' | 'kyc_reviewer' — only meaningful when isAdmin is true
+  adminRole: varchar('admin_role', { length: 20 }),
+  mustChangePassword: boolean('must_change_password').default(false).notNull(),
+  // Hashes of the last few passwords (most recent first), for reuse prevention
+  passwordHistory: jsonb('password_history').$type<string[]>().default([]).notNull(),
   fireblocksVaultId: varchar('fireblocks_vault_id', { length: 100 }),
   // KYC / Sumsub
   sumsubApplicantId: varchar('sumsub_applicant_id', { length: 100 }),

@@ -3,11 +3,11 @@ import type { Response } from 'express';
 import { db } from '../db/index.js';
 import { users, userSessions, apiKeys, wallets, auditLogs, adminNotifications, platformSettings, fireblocksEvents, applications } from '../db/schema.js';
 import { eq, desc, ilike, or, count, and, lt, sql } from 'drizzle-orm';
-import { requireAuth, requireAdmin, type AuthRequest } from '../middleware/auth.js';
+import { requireAuth, requireAdmin, requireFullAdmin, type AuthRequest } from '../middleware/auth.js';
 import { logAudit } from '../lib/audit.js';
 import { invalidateMailer, testSmtp } from '../lib/mailer.js';
 import { generateKeyId, generateRawKey, hashKey } from '../lib/apiKey.js';
-import { hashPassword } from '../lib/password.js';
+import { hashPassword, matchesPasswordHistory, pushPasswordHistory } from '../lib/password.js';
 
 const router = Router();
 router.use(requireAuth, requireAdmin);
@@ -65,32 +65,51 @@ router.get('/users/:id', async (req: AuthRequest, res: Response) => {
 });
 
 // PATCH /admin/users/:id
-router.patch('/users/:id', async (req: AuthRequest, res: Response) => {
-  const allowed = ['firstName', 'lastName', 'email', 'username', 'level', 'status', 'isAdmin'] as const;
+router.patch('/users/:id', requireFullAdmin, async (req: AuthRequest, res: Response) => {
+  const allowed = ['firstName', 'lastName', 'email', 'username', 'level', 'status', 'isAdmin', 'adminRole'] as const;
   const updates: Record<string, unknown> = {};
   for (const field of allowed) {
     if (field in req.body) updates[field] = req.body[field];
   }
+  if ('adminRole' in updates && !['full', 'kyc_reviewer', null].includes(updates.adminRole as string | null)) {
+    res.status(400).json({ success: false, error: "adminRole must be 'full', 'kyc_reviewer', or null" });
+    return;
+  }
+  // Granting admin without a role, or revoking admin, is meaningless/dangerous — keep the two fields in sync.
+  if (updates.isAdmin === true && !('adminRole' in updates)) updates.adminRole = 'kyc_reviewer';
+  if (updates.isAdmin === false) updates.adminRole = null;
   const [user] = await db.update(users).set({ ...updates, updatedAt: new Date() }).where(eq(users.id, req.params.id)).returning();
+  await logAudit({ userId: user.id, userName: user.email, action: 'User Updated', detail: `Fields updated by admin: ${Object.keys(updates).join(', ')}`, type: 'admin', severity: 'info' });
   res.json({ success: true, data: safeUser(user) });
 });
 
 // POST /admin/users/:id/reset-password
-router.post('/users/:id/reset-password', async (req: AuthRequest, res: Response) => {
+router.post('/users/:id/reset-password', requireFullAdmin, async (req: AuthRequest, res: Response) => {
   const { password } = req.body;
   if (!password || typeof password !== 'string' || password.length < 6) {
     res.status(400).json({ success: false, error: 'Password must be at least 6 characters' });
     return;
   }
+  const [target] = await db.select().from(users).where(eq(users.id, req.params.id)).limit(1);
+  if (!target) { res.status(404).json({ success: false, error: 'User not found' }); return; }
+  if (await matchesPasswordHistory(password, target.passwordHash, target.passwordHistory ?? [])) {
+    res.status(400).json({ success: false, error: 'New password must not match any of the last 4 passwords' });
+    return;
+  }
   const passwordHash = await hashPassword(password);
-  const [user] = await db.update(users).set({ passwordHash, updatedAt: new Date() }).where(eq(users.id, req.params.id)).returning();
-  if (!user) { res.status(404).json({ success: false, error: 'User not found' }); return; }
+  const [user] = await db.update(users).set({
+    passwordHash,
+    passwordHistory: pushPasswordHistory(target.passwordHash, target.passwordHistory ?? []),
+    // Admin-assigned passwords are temporary — force a change on next login for admin accounts (PCI DSS 8.3.5)
+    mustChangePassword: target.isAdmin ? true : target.mustChangePassword,
+    updatedAt: new Date(),
+  }).where(eq(users.id, req.params.id)).returning();
   await logAudit({ userId: user.id, userName: user.email, action: 'Password Reset', detail: 'Password reset by admin', type: 'security', severity: 'warning' });
   res.json({ success: true });
 });
 
 // POST /admin/users/:id/ban
-router.post('/users/:id/ban', async (req: AuthRequest, res: Response) => {
+router.post('/users/:id/ban', requireFullAdmin, async (req: AuthRequest, res: Response) => {
   const [user] = await db
     .update(users)
     .set({ status: 'banned', updatedAt: new Date() })
@@ -103,7 +122,7 @@ router.post('/users/:id/ban', async (req: AuthRequest, res: Response) => {
 });
 
 // POST /admin/users/:id/unban
-router.post('/users/:id/unban', async (req: AuthRequest, res: Response) => {
+router.post('/users/:id/unban', requireFullAdmin, async (req: AuthRequest, res: Response) => {
   const [user] = await db
     .update(users)
     .set({ status: 'active', updatedAt: new Date() })
@@ -114,21 +133,30 @@ router.post('/users/:id/unban', async (req: AuthRequest, res: Response) => {
   res.json({ success: true });
 });
 
-// POST /admin/users (create manually)
-router.post('/users', async (req: AuthRequest, res: Response) => {
-  const { email, username, password, firstName, lastName, level = 0, status = 'active' } = req.body;
+// POST /admin/users (create manually) — full admins only, since this can also mint other admins
+router.post('/users', requireFullAdmin, async (req: AuthRequest, res: Response) => {
+  const { email, username, password, firstName, lastName, level = 0, status = 'active', isAdmin = false, adminRole } = req.body;
   if (!email || !username || !password) {
     res.status(400).json({ success: false, error: 'email, username and password are required' }); return;
   }
   if (typeof password !== 'string' || password.length < 6) {
     res.status(400).json({ success: false, error: 'Password must be at least 6 characters' }); return;
   }
+  if (isAdmin && !['full', 'kyc_reviewer'].includes(adminRole)) {
+    res.status(400).json({ success: false, error: "adminRole must be 'full' or 'kyc_reviewer' when isAdmin is true" }); return;
+  }
   const passwordHash = await hashPassword(password);
   try {
     const [user] = await db.insert(users)
-      .values({ email, username, passwordHash, firstName, lastName, level, status, emailVerified: true })
+      .values({
+        email, username, passwordHash, firstName, lastName, level, status, emailVerified: true,
+        isAdmin: !!isAdmin,
+        adminRole: isAdmin ? adminRole : null,
+        // Individually-provisioned admin accounts start with a temporary password (PCI DSS 8.3.5)
+        mustChangePassword: !!isAdmin,
+      })
       .returning();
-    await logAudit({ userId: user.id, userName: user.email, action: 'User Created', detail: 'Account created by admin', type: 'admin', severity: 'info' });
+    await logAudit({ userId: user.id, userName: user.email, action: 'User Created', detail: isAdmin ? `Admin account created by admin (role: ${adminRole})` : 'Account created by admin', type: 'admin', severity: 'info' });
     res.status(201).json({ success: true, data: safeUser(user) });
   } catch (err: any) {
     if (err.code === '23505') {
@@ -156,7 +184,7 @@ router.patch('/users/:id/kyc', async (req: AuthRequest, res: Response) => {
 });
 
 // POST /admin/users/:id/notify
-router.post('/users/:id/notify', async (req: AuthRequest, res: Response) => {
+router.post('/users/:id/notify', requireFullAdmin, async (req: AuthRequest, res: Response) => {
   const { title, body, type = 'info' } = req.body;
   if (!title || !body) {
     res.status(400).json({ success: false, error: 'title and body are required' }); return;
@@ -169,7 +197,7 @@ router.post('/users/:id/notify', async (req: AuthRequest, res: Response) => {
 });
 
 // GET /admin/api-keys
-router.get('/api-keys', async (_req: AuthRequest, res: Response) => {
+router.get('/api-keys', requireFullAdmin, async (_req: AuthRequest, res: Response) => {
   const keys = await db
     .select({
       id: apiKeys.id,
@@ -190,7 +218,7 @@ router.get('/api-keys', async (_req: AuthRequest, res: Response) => {
 });
 
 // POST /admin/api-keys (create for a user)
-router.post('/api-keys', async (req: AuthRequest, res: Response) => {
+router.post('/api-keys', requireFullAdmin, async (req: AuthRequest, res: Response) => {
   const { userId, name, permissions = [] } = req.body;
   if (!userId || !name) { res.status(400).json({ success: false, error: 'userId and name required' }); return; }
   const validPerms = ['read', 'trade', 'withdraw', 'deposit'];
@@ -203,25 +231,25 @@ router.post('/api-keys', async (req: AuthRequest, res: Response) => {
 });
 
 // PATCH /admin/api-keys/:id/revoke
-router.patch('/api-keys/:id/revoke', async (req: AuthRequest, res: Response) => {
+router.patch('/api-keys/:id/revoke', requireFullAdmin, async (req: AuthRequest, res: Response) => {
   await db.update(apiKeys).set({ status: 'revoked' }).where(eq(apiKeys.id, req.params.id));
   res.json({ success: true });
 });
 
 // PATCH /admin/api-keys/:id/restore
-router.patch('/api-keys/:id/restore', async (req: AuthRequest, res: Response) => {
+router.patch('/api-keys/:id/restore', requireFullAdmin, async (req: AuthRequest, res: Response) => {
   await db.update(apiKeys).set({ status: 'active' }).where(eq(apiKeys.id, req.params.id));
   res.json({ success: true });
 });
 
 // DELETE /admin/api-keys/:id
-router.delete('/api-keys/:id', async (req: AuthRequest, res: Response) => {
+router.delete('/api-keys/:id', requireFullAdmin, async (req: AuthRequest, res: Response) => {
   await db.delete(apiKeys).where(eq(apiKeys.id, req.params.id));
   res.json({ success: true });
 });
 
 // GET /admin/audit
-router.get('/audit', async (req: AuthRequest, res: Response) => {
+router.get('/audit', requireFullAdmin, async (req: AuthRequest, res: Response) => {
   const { severity, type, limit = '50' } = req.query as Record<string, string>;
   let query = db.select().from(auditLogs).$dynamic();
   if (severity && severity !== 'all') query = query.where(eq(auditLogs.severity, severity));
@@ -231,7 +259,7 @@ router.get('/audit', async (req: AuthRequest, res: Response) => {
 });
 
 // GET /admin/sessions
-router.get('/sessions', async (_req: AuthRequest, res: Response) => {
+router.get('/sessions', requireFullAdmin, async (_req: AuthRequest, res: Response) => {
   const rows = await db
     .select({
       id: userSessions.id,
@@ -252,13 +280,13 @@ router.get('/sessions', async (_req: AuthRequest, res: Response) => {
 });
 
 // DELETE /admin/sessions/:id
-router.delete('/sessions/:id', async (req: AuthRequest, res: Response) => {
+router.delete('/sessions/:id', requireFullAdmin, async (req: AuthRequest, res: Response) => {
   await db.delete(userSessions).where(eq(userSessions.id, req.params.id));
   res.json({ success: true });
 });
 
 // DELETE /admin/sessions (revoke all except current)
-router.delete('/sessions', async (req: AuthRequest, res: Response) => {
+router.delete('/sessions', requireFullAdmin, async (req: AuthRequest, res: Response) => {
   const all = await db.select({ id: userSessions.id }).from(userSessions);
   for (const s of all) {
     if (s.id !== req.sessionId) {
@@ -269,32 +297,32 @@ router.delete('/sessions', async (req: AuthRequest, res: Response) => {
 });
 
 // GET /admin/notifications
-router.get('/notifications', async (_req: AuthRequest, res: Response) => {
+router.get('/notifications', requireFullAdmin, async (_req: AuthRequest, res: Response) => {
   const rows = await db.select().from(adminNotifications).orderBy(desc(adminNotifications.createdAt)).limit(100);
   res.json({ success: true, data: rows });
 });
 
 // PATCH /admin/notifications/:id/read
-router.patch('/notifications/:id/read', async (req: AuthRequest, res: Response) => {
+router.patch('/notifications/:id/read', requireFullAdmin, async (req: AuthRequest, res: Response) => {
   await db.update(adminNotifications).set({ isRead: true }).where(eq(adminNotifications.id, req.params.id));
   res.json({ success: true });
 });
 
 // PATCH /admin/notifications/read-all
-router.patch('/notifications/read-all', async (_req: AuthRequest, res: Response) => {
+router.patch('/notifications/read-all', requireFullAdmin, async (_req: AuthRequest, res: Response) => {
   await db.update(adminNotifications).set({ isRead: true }).where(eq(adminNotifications.isRead, false));
   res.json({ success: true });
 });
 
 // GET /admin/settings
-router.get('/settings', async (_req: AuthRequest, res: Response) => {
+router.get('/settings', requireFullAdmin, async (_req: AuthRequest, res: Response) => {
   const rows = await db.select().from(platformSettings);
   const settings = Object.fromEntries(rows.map(r => [r.key, r.value]));
   res.json({ success: true, data: settings });
 });
 
 // PATCH /admin/settings
-router.patch('/settings', async (req: AuthRequest, res: Response) => {
+router.patch('/settings', requireFullAdmin, async (req: AuthRequest, res: Response) => {
   const updates = req.body as Record<string, string>;
   for (const [key, value] of Object.entries(updates)) {
     await db
@@ -311,7 +339,7 @@ router.patch('/settings', async (req: AuthRequest, res: Response) => {
 });
 
 // POST /admin/smtp/test — verify credentials and send a test email
-router.post('/smtp/test', async (req: AuthRequest, res: Response) => {
+router.post('/smtp/test', requireFullAdmin, async (req: AuthRequest, res: Response) => {
   const { host, port, secure, user, pass, from, recipient, testTo } = req.body as Record<string, string>;
   const toEmail = testTo || recipient || 'info@krypto-knight.com';
   try {
@@ -401,7 +429,7 @@ router.get('/applications/:userId/document/:docIndex', async (req: AuthRequest, 
 });
 
 // GET /admin/fireblocks-events — paginated webhook event log
-router.get('/fireblocks-events', async (req: AuthRequest, res: Response) => {
+router.get('/fireblocks-events', requireFullAdmin, async (req: AuthRequest, res: Response) => {
   const { direction, eventType, limit = '100' } = req.query as Record<string, string>;
   let query = db.select().from(fireblocksEvents).$dynamic();
   if (direction && direction !== 'all') query = query.where(eq(fireblocksEvents.direction, direction));
@@ -411,9 +439,10 @@ router.get('/fireblocks-events', async (req: AuthRequest, res: Response) => {
 });
 
 function safeUser(u: typeof users.$inferSelect) {
-  const { passwordHash, twoFaSecret, ...safe } = u;
+  const { passwordHash, twoFaSecret, passwordHistory, ...safe } = u;
   void passwordHash;
   void twoFaSecret;
+  void passwordHistory;
   return safe;
 }
 

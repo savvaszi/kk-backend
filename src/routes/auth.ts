@@ -3,20 +3,21 @@ import type { Request, Response } from 'express';
 import { db } from '../db/index.js';
 import { users, userSessions } from '../db/schema.js';
 import { eq, and, gt } from 'drizzle-orm';
-import { hashPassword, verifyPassword } from '../lib/password.js';
-import { signToken, verifyToken, tokenExpiresAt } from '../lib/jwt.js';
+import { hashPassword, verifyPassword, matchesPasswordHistory, pushPasswordHistory } from '../lib/password.js';
+import { signToken, verifyToken, tokenExpiresAt, signPreAuthToken, verifyPreAuthToken } from '../lib/jwt.js';
 import { logAudit } from '../lib/audit.js';
 import { requireAuth, type AuthRequest } from '../middleware/auth.js';
 import crypto from 'crypto';
 import { sendMail } from '../lib/mailer.js';
+import { verifySync } from 'otplib';
 
 const router = Router();
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function safeUser(u: typeof users.$inferSelect) {
-  const { passwordHash, twoFaSecret, twoFaBackupCodes, passwordResetToken, passwordResetExpiresAt, ...safe } = u;
+  const { passwordHash, twoFaSecret, twoFaBackupCodes, passwordResetToken, passwordResetExpiresAt, passwordHistory, ...safe } = u;
   void passwordHash; void twoFaSecret; void twoFaBackupCodes;
-  void passwordResetToken; void passwordResetExpiresAt;
+  void passwordResetToken; void passwordResetExpiresAt; void passwordHistory;
   return safe;
 }
 
@@ -115,6 +116,17 @@ router.post('/login', async (req: Request, res: Response) => {
     return;
   }
 
+  // Password-only sessions are not granted to accounts with 2FA enabled —
+  // require a TOTP/backup code via /auth/login/verify-2fa first (PCI DSS 8.3.9).
+  if (user.twoFaEnabled) {
+    await logAudit({
+      userId: user.id, userName: user.email,
+      action: 'Login (password OK, 2FA pending)', type: 'auth', severity: 'info', ipAddress: req.ip ?? undefined,
+    });
+    res.json({ success: true, data: { requires2FA: true, preAuthToken: signPreAuthToken(user.id) } });
+    return;
+  }
+
   const session = await createSession(user.id, req);
   const token = signToken({ userId: user.id, sessionId: session.id });
 
@@ -122,6 +134,65 @@ router.post('/login', async (req: Request, res: Response) => {
   await logAudit({
     userId: user.id, userName: user.email,
     action: 'Login', detail: `Login from ${req.headers['user-agent']?.slice(0, 80) ?? 'unknown'}`,
+    type: 'auth', severity: 'info', ipAddress: req.ip ?? undefined,
+  });
+
+  res.json({ success: true, data: { token, user: safeUser(user) } });
+});
+
+// ── POST /auth/login/verify-2fa ───────────────────────────────────────────────
+// Second step of login for accounts with 2FA enabled. Accepts a TOTP code or
+// one of the account's backup codes.
+router.post('/login/verify-2fa', async (req: Request, res: Response) => {
+  const { preAuthToken, code } = req.body;
+  if (!preAuthToken || !code) {
+    res.status(400).json({ success: false, error: 'preAuthToken and code are required' });
+    return;
+  }
+
+  let userId: string;
+  try {
+    userId = verifyPreAuthToken(preAuthToken).userId;
+  } catch {
+    res.status(401).json({ success: false, error: 'Invalid or expired login session — please log in again' });
+    return;
+  }
+
+  const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  if (!user || !user.twoFaEnabled || !user.twoFaSecret) {
+    res.status(401).json({ success: false, error: 'Invalid login session' });
+    return;
+  }
+  if (user.status === 'banned') {
+    res.status(403).json({ success: false, error: 'Account is banned' });
+    return;
+  }
+
+  let usedBackup = false;
+  let codeValid = verifySync({ token: String(code), secret: user.twoFaSecret })?.valid ?? false;
+  if (!codeValid && user.twoFaBackupCodes) {
+    const idx = (user.twoFaBackupCodes as string[]).indexOf(String(code).toUpperCase());
+    if (idx !== -1) {
+      codeValid = true;
+      usedBackup = true;
+      const newCodes = [...(user.twoFaBackupCodes as string[])];
+      newCodes.splice(idx, 1);
+      await db.update(users).set({ twoFaBackupCodes: newCodes }).where(eq(users.id, user.id));
+    }
+  }
+  if (!codeValid) {
+    await logAudit({ userId: user.id, userName: user.email, action: 'Login 2FA Failed', detail: 'Invalid TOTP/backup code', type: 'security', severity: 'warning', ipAddress: req.ip ?? undefined });
+    res.status(401).json({ success: false, error: 'Invalid code' });
+    return;
+  }
+
+  const session = await createSession(user.id, req);
+  const token = signToken({ userId: user.id, sessionId: session.id });
+
+  await db.update(users).set({ lastSeenAt: new Date() }).where(eq(users.id, user.id));
+  await logAudit({
+    userId: user.id, userName: user.email,
+    action: 'Login', detail: usedBackup ? 'Login via 2FA backup code' : 'Login via 2FA',
     type: 'auth', severity: 'info', ipAddress: req.ip ?? undefined,
   });
 
@@ -250,9 +321,16 @@ router.post('/reset-password', async (req: Request, res: Response) => {
     return;
   }
 
+  if (await matchesPasswordHistory(newPassword, user.passwordHash, user.passwordHistory ?? [])) {
+    res.status(400).json({ success: false, error: 'New password must not match any of your last 4 passwords' });
+    return;
+  }
+
   const newHash = await hashPassword(newPassword);
   await db.update(users).set({
     passwordHash: newHash,
+    passwordHistory: pushPasswordHistory(user.passwordHash, user.passwordHistory ?? []),
+    mustChangePassword: false,
     passwordResetToken: null,
     passwordResetExpiresAt: null,
     updatedAt: new Date(),

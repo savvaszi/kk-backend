@@ -223,6 +223,13 @@ export async function initDb() {
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_token VARCHAR(255)`;
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_expires_at TIMESTAMPTZ`;
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS two_fa_backup_codes JSONB`;
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_role VARCHAR(20)`;
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT FALSE NOT NULL`;
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS password_history JSONB DEFAULT '[]' NOT NULL`;
+
+  // Any pre-existing admin without a role assigned yet defaults to 'full'
+  // (keeps already-provisioned admins from losing access after this migration)
+  await sql`UPDATE users SET admin_role = 'full' WHERE is_admin = TRUE AND admin_role IS NULL`;
 
   // Seed default platform settings
   await sql`
@@ -256,8 +263,8 @@ export async function initDb() {
     const { hashPassword } = await import('../lib/password.js');
     const hash = await hashPassword(adminPassword);
     await sql`
-      INSERT INTO users (email, username, password_hash, first_name, status, is_admin, email_verified, security_score)
-      VALUES (${adminEmail}, 'admin', ${hash}, 'Admin', 'active', TRUE, TRUE, 100)
+      INSERT INTO users (email, username, password_hash, first_name, status, is_admin, admin_role, must_change_password, email_verified, security_score)
+      VALUES (${adminEmail}, 'admin', ${hash}, 'Admin', 'active', TRUE, 'full', TRUE, TRUE, 100)
       ON CONFLICT (email) DO NOTHING
     `;
   }

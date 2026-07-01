@@ -7,7 +7,7 @@ import { requireAuth, type AuthRequest } from '../middleware/auth.js';
 import { logAudit } from '../lib/audit.js';
 import { calcSecurityScore } from '../lib/security.js';
 import { generateKeyId, generateRawKey, hashKey } from '../lib/apiKey.js';
-import { verifyPassword, hashPassword } from '../lib/password.js';
+import { verifyPassword, hashPassword, matchesPasswordHistory, pushPasswordHistory } from '../lib/password.js';
 import { generateSecret, generateURI, verifySync } from 'otplib';
 import QRCode from 'qrcode';
 
@@ -222,8 +222,18 @@ router.post('/security/change-password', async (req: AuthRequest, res: Response)
   const valid = await verifyPassword(currentPassword, user.passwordHash);
   if (!valid) { res.status(401).json({ success: false, error: 'Current password is incorrect' }); return; }
 
+  if (await matchesPasswordHistory(newPassword, user.passwordHash, user.passwordHistory ?? [])) {
+    res.status(400).json({ success: false, error: 'New password must not match any of your last 4 passwords' });
+    return;
+  }
+
   const newHash = await hashPassword(newPassword);
-  await db.update(users).set({ passwordHash: newHash, updatedAt: new Date() }).where(eq(users.id, user.id));
+  await db.update(users).set({
+    passwordHash: newHash,
+    passwordHistory: pushPasswordHistory(user.passwordHash, user.passwordHistory ?? []),
+    mustChangePassword: false,
+    updatedAt: new Date(),
+  }).where(eq(users.id, user.id));
 
   // Revoke all other sessions for security
   const allSessions = await db.select({ id: userSessions.id }).from(userSessions).where(eq(userSessions.userId, user.id));
@@ -476,9 +486,9 @@ async function refreshScore(userId: string) {
 }
 
 function safeUser(u: typeof users.$inferSelect) {
-  const { passwordHash, twoFaSecret, twoFaBackupCodes, passwordResetToken, passwordResetExpiresAt, ...safe } = u;
+  const { passwordHash, twoFaSecret, twoFaBackupCodes, passwordResetToken, passwordResetExpiresAt, passwordHistory, ...safe } = u;
   void passwordHash; void twoFaSecret; void twoFaBackupCodes;
-  void passwordResetToken; void passwordResetExpiresAt;
+  void passwordResetToken; void passwordResetExpiresAt; void passwordHistory;
   return safe;
 }
 
