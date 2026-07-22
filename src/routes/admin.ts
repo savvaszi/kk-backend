@@ -222,7 +222,7 @@ router.get('/api-keys', requireFullAdmin, async (_req: AuthRequest, res: Respons
 router.post('/api-keys', requireFullAdmin, async (req: AuthRequest, res: Response) => {
   const { userId, name, permissions = [] } = req.body;
   if (!userId || !name) { res.status(400).json({ success: false, error: 'userId and name required' }); return; }
-  const validPerms = ['read', 'trade', 'withdraw', 'deposit'];
+  const validPerms = ['read', 'trade', 'withdraw', 'deposit', 'complaints:read'];
   const perms = (permissions as string[]).filter(p => validPerms.includes(p));
   const keyId = generateKeyId();
   const raw = generateRawKey();
@@ -477,7 +477,13 @@ function csvCell(value: unknown) {
 }
 
 function complaintsCsv(rows: any[]) {
-  const fields = ['reference', 'client_name', 'client_email', 'status', 'category', 'submitted_at', 'acknowledged_at', 'resolved_at', 'affected_date', 'affected_transaction', 'desired_outcome', 'resolution_summary'];
+  const fields = [
+    'reference', 'client_name', 'client_email', 'client_phone', 'client_address',
+    'account_number', 'status', 'category', 'submitted_at', 'acknowledged_at',
+    'resolved_at', 'affected_date', 'affected_transaction', 'description',
+    'desired_outcome', 'supporting_evidence', 'confirmation_name', 'signature',
+    'resolution_summary',
+  ];
   return [fields.join(','), ...rows.map(row => fields.map(field => csvCell(row[field])).join(','))].join('\r\n');
 }
 
@@ -502,6 +508,18 @@ router.get('/complaints/report', requireFullAdmin, async (req: AuthRequest, res:
     return;
   }
   res.json({ success: true, data: { summary, csv: complaintsCsv(rows) } });
+});
+
+router.post('/complaints/integration-key', requireFullAdmin, async (req: AuthRequest, res: Response) => {
+  const name = String(req.body?.name || 'Complaints CRM integration').trim().slice(0, 255);
+  const keyId = generateKeyId();
+  const raw = generateRawKey();
+  const keyHash = await hashKey(raw);
+  const [key] = await db.insert(apiKeys).values({
+    userId: req.userId!, keyId, keyHash, name, permissions: ['complaints:read'],
+  }).returning({ id: apiKeys.id, keyId: apiKeys.keyId, name: apiKeys.name, permissions: apiKeys.permissions, createdAt: apiKeys.createdAt });
+  await logAudit({ userId: req.userId, action: 'Complaints CRM Key Created', detail: name, type: 'api', severity: 'warning', ipAddress: req.ip });
+  res.status(201).json({ success: true, data: { ...key, fullKey: `${keyId}.${raw}` } });
 });
 
 router.get('/complaints/:id/attachments/:attachmentId', requireFullAdmin, async (req: AuthRequest, res: Response) => {

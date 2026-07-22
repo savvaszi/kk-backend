@@ -11,16 +11,50 @@
  *   4. Email admin notification + welcome email to applicant (new accounts only).
  */
 
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 import multer from 'multer';
-import { db } from '../db/index.js';
-import { users, applications } from '../db/schema.js';
-import { eq } from 'drizzle-orm';
+import rateLimit from 'express-rate-limit';
+import { db, sql as pg } from '../db/index.js';
+import { users, applications, apiKeys } from '../db/schema.js';
+import { and, eq } from 'drizzle-orm';
 import { hashPassword } from '../lib/password.js';
 import { sendMail, getRecipient } from '../lib/mailer.js';
+import { verifyKey } from '../lib/apiKey.js';
+import { logAudit } from '../lib/audit.js';
 
 const router = Router();
+
+interface ComplaintsIntegrationRequest extends Request {
+  integrationKeyId?: string;
+  integrationUserId?: string;
+}
+
+const complaintsIntegrationLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'Too many integration requests. Try again shortly.' },
+});
+
+async function requireComplaintsApiKey(req: ComplaintsIntegrationRequest, res: Response, next: NextFunction) {
+  const header = req.headers.authorization;
+  const credential = header?.startsWith('Bearer ') ? header.slice(7).trim() : '';
+  const separator = credential.indexOf('.');
+  if (separator < 1) { res.status(401).json({ success: false, error: 'A complaints integration API key is required.' }); return; }
+  const keyId = credential.slice(0, separator);
+  const raw = credential.slice(separator + 1);
+  const [key] = await db.select().from(apiKeys).where(and(eq(apiKeys.keyId, keyId), eq(apiKeys.status, 'active'))).limit(1);
+  if (!key || !Array.isArray(key.permissions) || !key.permissions.includes('complaints:read') || !(await verifyKey(raw, key.keyHash))) {
+    res.status(401).json({ success: false, error: 'Invalid or revoked complaints integration API key.' });
+    return;
+  }
+  req.integrationKeyId = key.id;
+  req.integrationUserId = key.userId;
+  await db.update(apiKeys).set({ lastUsedAt: new Date() }).where(eq(apiKeys.id, key.id));
+  next();
+}
 
 // Store uploads in memory so we can attach them to the email and persist to DB
 const upload = multer({
@@ -442,6 +476,80 @@ router.post('/apply/business', businessUpload as any, async (req: Request, res: 
     console.error('[apply/business] error:', err?.message);
     res.status(500).json({ success: false, error: 'Failed to submit application. Please try again.' });
   }
+});
+
+// ── Read-only complaints CRM integration ────────────────────────────────────
+// Uses dedicated API keys with the complaints:read permission. Keys are issued
+// by full admins and can be revoked from the existing API Keys register.
+router.use('/integrations/complaints', complaintsIntegrationLimiter, requireComplaintsApiKey);
+
+const isUuid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+
+router.get('/integrations/complaints', async (req: ComplaintsIntegrationRequest, res: Response) => {
+  const rawSince = typeof req.query.updated_since === 'string' ? req.query.updated_since : '';
+  const since = rawSince ? new Date(rawSince) : null;
+  if (since && Number.isNaN(since.getTime())) {
+    res.status(400).json({ success: false, error: 'updated_since must be a valid ISO 8601 timestamp.' });
+    return;
+  }
+  const afterId = typeof req.query.after_id === 'string' && req.query.after_id ? req.query.after_id : null;
+  if (afterId && !isUuid(afterId)) { res.status(400).json({ success: false, error: 'after_id must be a complaint UUID.' }); return; }
+  const requestedLimit = Number.parseInt(String(req.query.limit || '100'), 10);
+  const limit = Number.isFinite(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 200) : 100;
+  const sinceIso = since?.toISOString() ?? null;
+  const rows = await pg`
+    SELECT id, reference, client_name, client_email, client_phone, client_address,
+      account_number, description, affected_date, affected_transaction, desired_outcome,
+      supporting_evidence, declaration_accurate, declaration_evidence,
+      declaration_additional_info, confirmation_name, signature, category, status,
+      resolution_summary, assigned_to, submitted_at, acknowledged_at, resolved_at, updated_at
+    FROM complaints
+    WHERE (
+      ${sinceIso}::timestamptz IS NULL OR updated_at > ${sinceIso}::timestamptz OR
+      (updated_at = ${sinceIso}::timestamptz AND (${afterId}::uuid IS NULL OR id > ${afterId}::uuid))
+    )
+    ORDER BY updated_at ASC, id ASC
+    LIMIT ${limit}
+  `;
+  await logAudit({ userId: req.integrationUserId, action: 'Complaints CRM Exported', detail: `${rows.length} records`, type: 'api', severity: 'info', ipAddress: req.ip });
+  res.json({
+    success: true,
+    data: rows,
+    meta: {
+      count: rows.length,
+      nextUpdatedSince: rows.length ? rows[rows.length - 1].updated_at : sinceIso,
+      nextAfterId: rows.length ? rows[rows.length - 1].id : afterId,
+    },
+  });
+});
+
+router.get('/integrations/complaints/:id', async (req: ComplaintsIntegrationRequest, res: Response) => {
+  if (!isUuid(req.params.id)) { res.status(400).json({ success: false, error: 'Invalid complaint id.' }); return; }
+  const rows = await pg`
+    SELECT id, reference, client_name, client_email, client_phone, client_address,
+      account_number, description, affected_date, affected_transaction, desired_outcome,
+      supporting_evidence, declaration_accurate, declaration_evidence,
+      declaration_additional_info, confirmation_name, signature, category, status,
+      resolution_summary, assigned_to, submitted_at, acknowledged_at, resolved_at, updated_at
+    FROM complaints WHERE id = ${req.params.id}
+  `;
+  if (!rows[0]) { res.status(404).json({ success: false, error: 'Complaint not found.' }); return; }
+  const attachments = await pg`SELECT id, filename, mime, size, uploaded_at FROM complaint_attachments WHERE complaint_id = ${req.params.id} ORDER BY uploaded_at`;
+  await logAudit({ userId: req.integrationUserId, action: 'Complaint CRM Accessed', detail: rows[0].reference, type: 'api', severity: 'info', ipAddress: req.ip, metadata: { complaintId: req.params.id } });
+  res.json({ success: true, data: { ...rows[0], attachments } });
+});
+
+router.get('/integrations/complaints/:id/attachments/:attachmentId', async (req: ComplaintsIntegrationRequest, res: Response) => {
+  if (!isUuid(req.params.id) || !isUuid(req.params.attachmentId)) { res.status(400).json({ success: false, error: 'Invalid attachment id.' }); return; }
+  const rows = await pg`
+    SELECT filename, mime, data FROM complaint_attachments
+    WHERE id = ${req.params.attachmentId} AND complaint_id = ${req.params.id}
+  `;
+  if (!rows[0]) { res.status(404).json({ success: false, error: 'Attachment not found.' }); return; }
+  await logAudit({ userId: req.integrationUserId, action: 'Complaint CRM Attachment Accessed', detail: req.params.attachmentId, type: 'api', severity: 'info', ipAddress: req.ip, metadata: { complaintId: req.params.id } });
+  res.setHeader('Content-Type', rows[0].mime);
+  res.setHeader('Content-Disposition', `attachment; filename="${String(rows[0].filename).replace(/["\r\n]/g, '_')}"`);
+  res.send(rows[0].data);
 });
 
 export default router;

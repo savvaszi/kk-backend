@@ -1894,7 +1894,8 @@ const PageComplaints = ({ users=[] }) => {
   const [saving, setSaving] = useState(false);
   const [file, setFile] = useState(null);
   const [msg, setMsg] = useState(null);
-  const [meta, setMeta] = useState(null);
+  const [integrationKey, setIntegrationKey] = useState(null);
+  const [keyCopied, setKeyCopied] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1932,6 +1933,25 @@ const PageComplaints = ({ users=[] }) => {
     a.href = url; a.download = 'complaints-report.csv'; a.click(); URL.revokeObjectURL(url);
   };
 
+  const downloadAttachment = async (attachment) => {
+    const res = await fetch(`/admin/complaints/${selected.id}/attachments/${attachment.id}`, { headers:{ 'Authorization':`Bearer ${token}` } });
+    if (!res.ok) { setMsg({ok:false,text:'Attachment download failed.'}); return; }
+    const blob = await res.blob(); const url = URL.createObjectURL(blob); const a = document.createElement('a');
+    a.href = url; a.download = attachment.filename; a.click(); URL.revokeObjectURL(url);
+  };
+
+  const createIntegrationKey = async () => {
+    setMsg(null);
+    const r = await api('/admin/complaints/integration-key', { method:'POST', body:JSON.stringify({ name:'Complaints CRM integration' }) });
+    if (r.success) setIntegrationKey(r.data.fullKey);
+    else setMsg({ok:false,text:r.error||'Could not create CRM integration key.'});
+  };
+
+  const copyIntegrationKey = async () => {
+    try { await navigator.clipboard.writeText(integrationKey); setKeyCopied(true); }
+    catch { setMsg({ok:false,text:'Copy was blocked. Copy the key manually.'}); }
+  };
+
   return (
     <div style={{ padding:'28px 24px', maxWidth:1400 }}>
       <div style={{ marginBottom:20 }}>
@@ -1957,17 +1977,30 @@ const PageComplaints = ({ users=[] }) => {
       </div>
       {selected && <div style={{ marginTop:18, background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:22 }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:18 }}><div><div style={{ fontSize:17, fontWeight:700 }}>{selected.reference}</div><div style={{ fontSize:12, color:C.muted, marginTop:4 }}>{selected.user_name || selected.user_email} · submitted {fmtDate(selected.submitted_at)}</div></div><Btn variant="ghost" onClick={()=>setSelected(null)}>Close ✕</Btn></div>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(240px,1fr))', gap:10, padding:14, background:C.card2, borderRadius:9, marginBottom:18, fontSize:12 }}>
+          <div><span style={{color:C.muted}}>Email:</span> {selected.client_email}</div><div><span style={{color:C.muted}}>Telephone:</span> {selected.client_phone||'—'}</div>
+          <div><span style={{color:C.muted}}>Address:</span> {selected.client_address||'—'}</div><div><span style={{color:C.muted}}>Customer number:</span> {selected.account_number||'—'}</div>
+          <div><span style={{color:C.muted}}>Affected date:</span> {selected.affected_date||'—'}</div><div><span style={{color:C.muted}}>Transaction:</span> {selected.affected_transaction||'—'}</div>
+          <div><span style={{color:C.muted}}>Confirmed by:</span> {selected.confirmation_name||'—'}</div><div><span style={{color:C.muted}}>Signature:</span> {selected.signature||'—'}</div>
+          <div><span style={{color:C.muted}}>Acknowledged:</span> {selected.acknowledged_at?fmtDate(selected.acknowledged_at):'Not yet'}</div><div><span style={{color:C.muted}}>Resolved:</span> {selected.resolved_at?fmtDate(selected.resolved_at):'Not yet'}</div>
+        </div>
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(220px,1fr))', gap:14, marginBottom:18 }}>
           <label style={{ fontSize:12, color:C.muted }}>Status<select value={selected.status} onChange={e=>setSelected({...selected,status:e.target.value})} style={{ display:'block', width:'100%', marginTop:6, background:C.card2, color:C.text, border:`1px solid ${C.border}`, borderRadius:7, padding:8 }}>{statuses.map(s=><option key={s}>{s}</option>)}</select></label>
           <label style={{ fontSize:12, color:C.muted }}>Category<select value={selected.category||''} onChange={e=>setSelected({...selected,category:e.target.value||null})} style={{ display:'block', width:'100%', marginTop:6, background:C.card2, color:C.text, border:`1px solid ${C.border}`, borderRadius:7, padding:8 }}><option value="">Unclassified</option>{categories.map(c=><option key={c}>{c}</option>)}</select></label>
           <label style={{ fontSize:12, color:C.muted }}>Assigned Compliance user<select value={selected.assigned_to||''} onChange={e=>setSelected({...selected,assigned_to:e.target.value||null})} style={{ display:'block', width:'100%', marginTop:6, background:C.card2, color:C.text, border:`1px solid ${C.border}`, borderRadius:7, padding:8 }}><option value="">Unassigned</option>{users.filter(u=>u.isAdmin).map(u=><option key={u.id} value={u.id}>{displayName(u)}</option>)}</select></label>
         </div>
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(280px,1fr))', gap:18 }}><div><div style={{ fontSize:12, color:C.muted, marginBottom:6 }}>Complaint details</div><div style={{ whiteSpace:'pre-wrap', fontSize:13, lineHeight:1.6 }}>{selected.description}</div><div style={{ fontSize:12, color:C.muted, marginTop:14, marginBottom:6 }}>Desired outcome</div><div style={{ whiteSpace:'pre-wrap', fontSize:13 }}>{selected.desired_outcome}</div></div><div><label style={{ display:'block', fontSize:12, color:C.muted }}>Internal notes<textarea value={selected.internal_notes||''} onChange={e=>setSelected({...selected,internal_notes:e.target.value})} style={{ display:'block', width:'100%', minHeight:100, marginTop:6, background:C.card2, color:C.text, border:`1px solid ${C.border}`, borderRadius:7, padding:9, fontFamily:'inherit' }}/></label><label style={{ display:'block', fontSize:12, color:C.muted, marginTop:12 }}>Resolution summary<textarea value={selected.resolution_summary||''} onChange={e=>setSelected({...selected,resolution_summary:e.target.value})} style={{ display:'block', width:'100%', minHeight:80, marginTop:6, background:C.card2, color:C.text, border:`1px solid ${C.border}`, borderRadius:7, padding:9, fontFamily:'inherit' }}/></label></div></div>
-        {(selected.attachments||[]).length > 0 && <div style={{ marginTop:18 }}><div style={{ fontSize:12, color:C.muted, marginBottom:8 }}>Evidence</div>{selected.attachments.map(a=><Btn key={a.id} variant="ghost" size="sm" onClick={()=>window.open(`/admin/complaints/${selected.id}/attachments/${a.id}`, '_blank')}>{a.filename} ({Math.round(a.size/1024)} KB)</Btn>)}</div>}
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(280px,1fr))', gap:18 }}><div><div style={{ fontSize:12, color:C.muted, marginBottom:6 }}>Complaint details</div><div style={{ whiteSpace:'pre-wrap', fontSize:13, lineHeight:1.6 }}>{selected.description}</div><div style={{ fontSize:12, color:C.muted, marginTop:14, marginBottom:6 }}>Desired outcome</div><div style={{ whiteSpace:'pre-wrap', fontSize:13 }}>{selected.desired_outcome}</div><div style={{ fontSize:12, color:C.muted, marginTop:14, marginBottom:6 }}>Supporting evidence description</div><div style={{ whiteSpace:'pre-wrap', fontSize:13 }}>{selected.supporting_evidence||'None provided'}</div></div><div><label style={{ display:'block', fontSize:12, color:C.muted }}>Internal notes<textarea value={selected.internal_notes||''} onChange={e=>setSelected({...selected,internal_notes:e.target.value})} style={{ display:'block', width:'100%', minHeight:100, marginTop:6, background:C.card2, color:C.text, border:`1px solid ${C.border}`, borderRadius:7, padding:9, fontFamily:'inherit' }}/></label><label style={{ display:'block', fontSize:12, color:C.muted, marginTop:12 }}>Resolution summary<textarea value={selected.resolution_summary||''} onChange={e=>setSelected({...selected,resolution_summary:e.target.value})} style={{ display:'block', width:'100%', minHeight:80, marginTop:6, background:C.card2, color:C.text, border:`1px solid ${C.border}`, borderRadius:7, padding:9, fontFamily:'inherit' }}/></label></div></div>
+        <div style={{ marginTop:16, padding:12, background:C.card2, borderRadius:8, fontSize:12, color:C.muted }}>Declarations: accurate information {selected.declaration_accurate?'✓':'✕'} · all relevant evidence {selected.declaration_evidence?'✓':'✕'} · additional information understood {selected.declaration_additional_info?'✓':'✕'}</div>
+        {(selected.attachments||[]).length > 0 && <div style={{ marginTop:18 }}><div style={{ fontSize:12, color:C.muted, marginBottom:8 }}>Evidence files</div><div style={{display:'flex',gap:8,flexWrap:'wrap'}}>{selected.attachments.map(a=><Btn key={a.id} variant="ghost" size="sm" icon="download" onClick={()=>downloadAttachment(a)}>{a.filename} ({Math.round(a.size/1024)} KB)</Btn>)}</div></div>}
         {(selected.events||[]).length > 0 && <div style={{ marginTop:18 }}><div style={{ fontSize:12, color:C.muted, marginBottom:8 }}>Case history</div>{selected.events.map((event,i)=><div key={i} style={{ display:'flex', gap:10, padding:'8px 0', borderTop:i?`1px solid ${C.border}`:'none', fontSize:12 }}><span style={{ color:C.muted, whiteSpace:'nowrap' }}>{fmtDate(event.created_at)}</span><span style={{ flex:1 }}>{event.action}{event.detail?` — ${event.detail}`:''}</span><span style={{ color:C.muted }}>{event.user_name||''}</span></div>)}</div>}
         <div style={{ marginTop:20, display:'flex', justifyContent:'flex-end' }}><Btn onClick={save} disabled={saving}>{saving?'Saving…':'Save changes'}</Btn></div>
       </div>}
-      <div style={{ marginTop:24, background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:18 }}><div style={{ fontSize:13, fontWeight:600, marginBottom:8 }}>Legacy PDF form</div><div style={{ fontSize:12, color:C.muted, marginBottom:12 }}>Kept temporarily for clients who still need the previous submission route.</div><input type="file" accept="application/pdf,.pdf" onChange={e=>setFile(e.target.files[0]||null)} style={{ fontSize:12, color:C.muted }}/><Btn disabled={!file} style={{ marginLeft:10 }} onClick={async()=>{const res=await fetch('/admin/complaint-form',{method:'POST',headers:{'Authorization':`Bearer ${token}`,'Content-Type':'application/pdf','X-Filename':file.name},body:file});const d=await res.json().catch(()=>({}));setMsg({ok:res.ok&&d.success,text:res.ok&&d.success?'Legacy form published.':d.error||'Upload failed.'});setFile(null);}}>Publish PDF</Btn></div>
+      <div style={{ marginTop:24, background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:18 }}><div style={{ fontSize:13, fontWeight:600, marginBottom:8 }}>PDF complaint form</div><div style={{ fontSize:12, color:C.muted, marginBottom:12 }}>The official PDF remains available for clients who prefer email submission.</div><a href="/Krypto_Knight_Complaint_Form.pdf" target="_blank" style={{ color:C.orange, fontSize:12, marginRight:16 }}>View current PDF</a><input type="file" accept="application/pdf,.pdf" onChange={e=>setFile(e.target.files[0]||null)} style={{ fontSize:12, color:C.muted }}/><Btn disabled={!file} style={{ marginLeft:10 }} onClick={async()=>{const res=await fetch('/admin/complaint-form',{method:'POST',headers:{'Authorization':`Bearer ${token}`,'Content-Type':'application/pdf','X-Filename':file.name},body:file});const d=await res.json().catch(()=>({}));setMsg({ok:res.ok&&d.success,text:res.ok&&d.success?'PDF stored in the compatibility endpoint.':d.error||'Upload failed.'});setFile(null);}}>Store replacement PDF</Btn></div>
+      <div style={{ marginTop:18, background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:18 }}>
+        <div style={{ fontSize:13, fontWeight:600, marginBottom:6 }}>CRM integration API</div>
+        <div style={{ fontSize:12, color:C.muted, lineHeight:1.6, marginBottom:12 }}>Give a dedicated read-only key to an approved IT provider. They can poll <code style={{color:C.text}}>GET https://api.krypto-knight.com/public/integrations/complaints</code>. The key is shown only once and can be revoked under API Keys.</div>
+        {!integrationKey ? <Btn icon="key" onClick={createIntegrationKey}>Generate CRM API key</Btn> : <div><code style={{ display:'block', padding:10, borderRadius:7, background:C.card2, color:C.text, wordBreak:'break-all', marginBottom:10 }}>{integrationKey}</code><Btn variant="ghost" icon={keyCopied?'check':'copy'} onClick={copyIntegrationKey}>{keyCopied?'Copied':'Copy key'}</Btn><span style={{fontSize:11,color:C.yellow,marginLeft:10}}>Save it now; it cannot be displayed again.</span></div>}
+      </div>
     </div>
   );
 };

@@ -241,6 +241,12 @@ export async function initDb() {
       affected_date VARCHAR(50),
       affected_transaction VARCHAR(255),
       desired_outcome TEXT NOT NULL,
+      supporting_evidence TEXT,
+      declaration_accurate BOOLEAN NOT NULL DEFAULT FALSE,
+      declaration_evidence BOOLEAN NOT NULL DEFAULT FALSE,
+      declaration_additional_info BOOLEAN NOT NULL DEFAULT FALSE,
+      confirmation_name VARCHAR(255),
+      signature TEXT,
       category VARCHAR(50),
       status VARCHAR(20) NOT NULL DEFAULT 'received',
       internal_notes TEXT,
@@ -252,6 +258,13 @@ export async function initDb() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `;
+
+  await sql`ALTER TABLE complaints ADD COLUMN IF NOT EXISTS supporting_evidence TEXT`;
+  await sql`ALTER TABLE complaints ADD COLUMN IF NOT EXISTS declaration_accurate BOOLEAN NOT NULL DEFAULT FALSE`;
+  await sql`ALTER TABLE complaints ADD COLUMN IF NOT EXISTS declaration_evidence BOOLEAN NOT NULL DEFAULT FALSE`;
+  await sql`ALTER TABLE complaints ADD COLUMN IF NOT EXISTS declaration_additional_info BOOLEAN NOT NULL DEFAULT FALSE`;
+  await sql`ALTER TABLE complaints ADD COLUMN IF NOT EXISTS confirmation_name VARCHAR(255)`;
+  await sql`ALTER TABLE complaints ADD COLUMN IF NOT EXISTS signature TEXT`;
 
   await sql`
     CREATE TABLE IF NOT EXISTS complaint_attachments (

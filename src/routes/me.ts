@@ -538,8 +538,24 @@ const htmlEscape = (value: unknown) => String(value ?? '')
 router.post('/complaints', complaintUploadMiddleware, async (req: AuthRequest, res: Response) => {
   const description = String(req.body.description || '').trim();
   const desiredOutcome = String(req.body.desiredOutcome || '').trim();
+  const clientPhone = String(req.body.phone || '').trim();
+  const clientAddress = String(req.body.address || '').trim();
+  const supportingEvidence = String(req.body.supportingEvidence || '').trim();
+  const confirmationName = String(req.body.confirmationName || '').trim();
+  const signature = String(req.body.signature || '').trim();
+  const declarationAccurate = String(req.body.declarationAccurate) === 'true';
+  const declarationEvidence = String(req.body.declarationEvidence) === 'true';
+  const declarationAdditionalInfo = String(req.body.declarationAdditionalInfo) === 'true';
   if (description.length < 10 || desiredOutcome.length < 3) {
     res.status(400).json({ success: false, error: 'A detailed complaint and desired outcome are required.' });
+    return;
+  }
+  if (clientPhone.length < 5 || clientAddress.length < 5 || confirmationName.length < 2) {
+    res.status(400).json({ success: false, error: 'Address, telephone number, and confirmation name are required.' });
+    return;
+  }
+  if (!declarationAccurate || !declarationEvidence || !declarationAdditionalInfo) {
+    res.status(400).json({ success: false, error: 'All submission declarations must be confirmed.' });
     return;
   }
   const files = (req.files as Express.Multer.File[] | undefined) ?? [];
@@ -564,7 +580,6 @@ router.post('/complaints', complaintUploadMiddleware, async (req: AuthRequest, r
   const [user] = await db.select().from(users).where(eq(users.id, req.userId!)).limit(1);
   if (!user) { res.status(401).json({ success: false, error: 'Account not accessible' }); return; }
   const clientName = [user.firstName, user.lastName].filter(Boolean).join(' ') || user.username || user.email;
-  const clientAddress = [user.streetAddress, user.city, user.state, user.zip, user.country].filter(Boolean).join(', ') || null;
   const id = randomUUID();
   const reference = `KK-C-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${id.slice(0, 8).toUpperCase()}`;
 
@@ -572,11 +587,15 @@ router.post('/complaints', complaintUploadMiddleware, async (req: AuthRequest, r
     await sql`
       INSERT INTO complaints (
         id, reference, user_id, client_name, client_email, client_phone, client_address,
-        account_number, description, affected_date, affected_transaction, desired_outcome
+        account_number, description, affected_date, affected_transaction, desired_outcome,
+        supporting_evidence, declaration_accurate, declaration_evidence,
+        declaration_additional_info, confirmation_name, signature
       ) VALUES (
-        ${id}, ${reference}, ${user.id}, ${clientName}, ${user.email}, ${user.phone ?? null}, ${clientAddress},
+        ${id}, ${reference}, ${user.id}, ${clientName}, ${user.email}, ${clientPhone}, ${clientAddress},
         ${String(req.body.accountNumber || '').trim() || null}, ${description},
-        ${String(req.body.affectedDate || '').trim() || null}, ${String(req.body.affectedTransaction || '').trim() || null}, ${desiredOutcome}
+        ${String(req.body.affectedDate || '').trim() || null}, ${String(req.body.affectedTransaction || '').trim() || null}, ${desiredOutcome},
+        ${supportingEvidence || null}, ${declarationAccurate}, ${declarationEvidence},
+        ${declarationAdditionalInfo}, ${confirmationName}, ${signature || null}
       )
     `;
     for (const file of files) {
@@ -594,7 +613,23 @@ router.post('/complaints', complaintUploadMiddleware, async (req: AuthRequest, r
     metadata: { complaintId: id, reference }, notify: true,
   });
 
-  const recipient = process.env.COMPLAINTS_EMAIL || 'compliance@krypto-knight.com';
+  const recipient = 'compliance@krypto-knight.com';
+  const complaintSummary = `
+    <table style="border-collapse:collapse;font-family:sans-serif;font-size:14px">
+      <tr><td style="padding:5px 12px;font-weight:600">Reference</td><td>${htmlEscape(reference)}</td></tr>
+      <tr><td style="padding:5px 12px;font-weight:600">Client</td><td>${htmlEscape(clientName)}</td></tr>
+      <tr><td style="padding:5px 12px;font-weight:600">Email</td><td>${htmlEscape(user.email)}</td></tr>
+      <tr><td style="padding:5px 12px;font-weight:600">Telephone</td><td>${htmlEscape(clientPhone)}</td></tr>
+      <tr><td style="padding:5px 12px;font-weight:600">Address</td><td>${htmlEscape(clientAddress)}</td></tr>
+      <tr><td style="padding:5px 12px;font-weight:600">Account number</td><td>${htmlEscape(req.body.accountNumber)}</td></tr>
+      <tr><td style="padding:5px 12px;font-weight:600">Affected date</td><td>${htmlEscape(req.body.affectedDate)}</td></tr>
+      <tr><td style="padding:5px 12px;font-weight:600">Transaction</td><td>${htmlEscape(req.body.affectedTransaction)}</td></tr>
+      <tr><td style="padding:5px 12px;font-weight:600">Complaint</td><td>${htmlEscape(description).replace(/\n/g, '<br>')}</td></tr>
+      <tr><td style="padding:5px 12px;font-weight:600">Desired outcome</td><td>${htmlEscape(desiredOutcome).replace(/\n/g, '<br>')}</td></tr>
+      <tr><td style="padding:5px 12px;font-weight:600">Evidence description</td><td>${htmlEscape(supportingEvidence).replace(/\n/g, '<br>')}</td></tr>
+      <tr><td style="padding:5px 12px;font-weight:600">Confirmed by</td><td>${htmlEscape(confirmationName)}</td></tr>
+      <tr><td style="padding:5px 12px;font-weight:600">Signature</td><td>${htmlEscape(signature)}</td></tr>
+    </table>`;
   await Promise.allSettled([
     sendMail({
       to: user.email,
@@ -605,7 +640,8 @@ router.post('/complaints', complaintUploadMiddleware, async (req: AuthRequest, r
       to: recipient,
       subject: `New complaint — ${reference}`,
       replyTo: user.email,
-      html: `<p>A new complaint has been submitted by ${htmlEscape(clientName)} (${htmlEscape(user.email)}).</p><p>Reference: <strong>${htmlEscape(reference)}</strong></p><p>Review it in the admin complaints register.</p>`,
+      html: `<p>A new formal complaint has been submitted.</p>${complaintSummary}<p>Review and manage it in the admin complaints register.</p>`,
+      attachments: files.map(file => ({ filename: file.originalname, content: file.buffer, contentType: file.mimetype })),
     }),
   ]);
 
