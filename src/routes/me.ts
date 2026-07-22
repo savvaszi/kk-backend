@@ -575,7 +575,7 @@ router.post('/complaints', complaintUploadMiddleware, async (req: AuthRequest, r
     metadata: { complaintId: id, reference }, notify: true,
   });
 
-  const recipient = process.env.COMPLAINTS_EMAIL || await getRecipient();
+  const recipient = process.env.COMPLAINTS_EMAIL || 'compliance@krypto-knight.com';
   await Promise.allSettled([
     sendMail({
       to: user.email,
