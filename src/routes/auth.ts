@@ -168,10 +168,21 @@ router.post('/login/verify-2fa', async (req: Request, res: Response) => {
     return;
   }
 
+  const submittedCode = String(code).trim().toUpperCase();
   let usedBackup = false;
-  let codeValid = verifySync({ token: String(code), secret: user.twoFaSecret })?.valid ?? false;
+  let codeValid = false;
+  if (/^\d{6}$/.test(submittedCode)) {
+    try {
+      codeValid = verifySync({ token: submittedCode, secret: user.twoFaSecret })?.valid ?? false;
+    } catch (error) {
+      console.error('2FA verification failed', {
+        userId: user.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
   if (!codeValid && user.twoFaBackupCodes) {
-    const idx = (user.twoFaBackupCodes as string[]).indexOf(String(code).toUpperCase());
+    const idx = (user.twoFaBackupCodes as string[]).indexOf(submittedCode);
     if (idx !== -1) {
       codeValid = true;
       usedBackup = true;
