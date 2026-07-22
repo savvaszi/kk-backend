@@ -11,7 +11,7 @@ import { verifyPassword, hashPassword, matchesPasswordHistory, pushPasswordHisto
 import { generateSecret, generateURI, verifySync } from 'otplib';
 import QRCode from 'qrcode';
 import multer from 'multer';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { sendMail, getRecipient } from '../lib/mailer.js';
 
 const router = Router();
@@ -135,14 +135,25 @@ router.post('/security/confirm-2fa', async (req: AuthRequest, res: Response) => 
   if (user.twoFaEnabled) { res.status(400).json({ success: false, error: '2FA already confirmed' }); return; }
   if (!user.twoFaSecret) { res.status(400).json({ success: false, error: 'Call /setup-2fa first' }); return; }
 
-  const result = verifySync({ token: String(code), secret: user.twoFaSecret });
-  if (!result?.valid) { res.status(400).json({ success: false, error: 'Invalid TOTP code' }); return; }
+  const submittedCode = String(code).trim();
+  if (!/^\d{6}$/.test(submittedCode)) {
+    res.status(400).json({ success: false, error: 'Enter the 6-digit code from your authenticator app' });
+    return;
+  }
+  let valid = false;
+  try {
+    valid = verifySync({ token: submittedCode, secret: user.twoFaSecret })?.valid ?? false;
+  } catch {
+    res.status(400).json({ success: false, error: 'Invalid TOTP code' });
+    return;
+  }
+  if (!valid) { res.status(400).json({ success: false, error: 'Invalid TOTP code' }); return; }
 
   // Generate 8 single-use backup codes
-  const backupCodes = Array.from({ length: 8 }, () =>
-    Math.random().toString(36).slice(2, 7).toUpperCase() + '-' +
-    Math.random().toString(36).slice(2, 7).toUpperCase()
-  );
+  const backupCodes = Array.from({ length: 8 }, () => {
+    const value = randomBytes(5).toString('hex').toUpperCase();
+    return `${value.slice(0, 5)}-${value.slice(5)}`;
+  });
 
   await db.update(users).set({
     twoFaEnabled: true,
@@ -174,14 +185,22 @@ router.post('/security/disable-2fa', async (req: AuthRequest, res: Response) => 
   if (!pwValid) { res.status(401).json({ success: false, error: 'Incorrect password' }); return; }
 
   // Accept TOTP code or backup code
-  let codeValid = verifySync({ token: String(code), secret: user.twoFaSecret })?.valid ?? false;
+  const submittedCode = String(code).trim().toUpperCase();
+  let codeValid = false;
+  if (/^\d{6}$/.test(submittedCode)) {
+    try {
+      codeValid = verifySync({ token: submittedCode, secret: user.twoFaSecret })?.valid ?? false;
+    } catch {
+      codeValid = false;
+    }
+  }
   let usedBackup = false;
-  if (!codeValid && user.twoFaBackupCodes) {
-    const idx = (user.twoFaBackupCodes as string[]).indexOf(String(code).toUpperCase());
+  if (!codeValid && Array.isArray(user.twoFaBackupCodes)) {
+    const idx = user.twoFaBackupCodes.indexOf(submittedCode);
     if (idx !== -1) {
       codeValid = true;
       usedBackup = true;
-      const newCodes = [...(user.twoFaBackupCodes as string[])];
+      const newCodes = [...user.twoFaBackupCodes];
       newCodes.splice(idx, 1);
       await db.update(users).set({ twoFaBackupCodes: newCodes }).where(eq(users.id, req.userId!));
     }
