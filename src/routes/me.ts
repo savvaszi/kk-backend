@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import type { Response } from 'express';
-import { db } from '../db/index.js';
+import { db, sql as pg } from '../db/index.js';
 import { users, userSessions, apiKeys, wallets, auditLogs } from '../db/schema.js';
 import { eq, and, gt, desc } from 'drizzle-orm';
 import { requireAuth, type AuthRequest } from '../middleware/auth.js';
@@ -491,5 +491,26 @@ function safeUser(u: typeof users.$inferSelect) {
   void passwordResetToken; void passwordResetExpiresAt; void passwordHistory;
   return safe;
 }
+
+// ── Complaint form (downloadable by any authenticated client) ─────────────────
+// Lightweight availability check for the dashboard UI.
+router.get('/complaint-form/meta', async (_req: AuthRequest, res: Response) => {
+  const rows = await pg`SELECT filename, size, uploaded_at FROM complaint_form WHERE id = 1`;
+  res.json({ success: true, data: rows[0] ? { available: true, ...rows[0] } : { available: false } });
+});
+
+// Stream the PDF as an attachment.
+router.get('/complaint-form', async (_req: AuthRequest, res: Response) => {
+  const rows = await pg`SELECT filename, mime, data FROM complaint_form WHERE id = 1`;
+  const row = rows[0];
+  if (!row) {
+    res.status(404).json({ success: false, error: 'No complaint form is currently available.' });
+    return;
+  }
+  const filename = String(row.filename || 'complaint-form.pdf').replace(/["\r\n]/g, '');
+  res.setHeader('Content-Type', row.mime || 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.send(row.data as Buffer);
+});
 
 export default router;

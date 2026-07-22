@@ -1,6 +1,7 @@
 import { Router } from 'express';
+import express from 'express';
 import type { Response } from 'express';
-import { db } from '../db/index.js';
+import { db, sql as pg } from '../db/index.js';
 import { users, userSessions, apiKeys, wallets, auditLogs, adminNotifications, platformSettings, fireblocksEvents, applications } from '../db/schema.js';
 import { eq, desc, ilike, or, count, and, lt, sql } from 'drizzle-orm';
 import { requireAuth, requireAdmin, requireFullAdmin, type AuthRequest } from '../middleware/auth.js';
@@ -445,5 +446,45 @@ function safeUser(u: typeof users.$inferSelect) {
   void passwordHistory;
   return safe;
 }
+
+// ── Complaint form (single downloadable PDF for clients) ──────────────────────
+// GET metadata of the currently published form (null if none).
+router.get('/complaint-form', requireFullAdmin, async (_req: AuthRequest, res: Response) => {
+  const rows = await pg`SELECT filename, mime, size, uploaded_by, uploaded_at FROM complaint_form WHERE id = 1`;
+  res.json({ success: true, data: rows[0] ?? null });
+});
+
+// POST upload/replace the form. Raw PDF body (max 10 MB); filename via X-Filename header.
+router.post('/complaint-form', requireFullAdmin,
+  express.raw({ type: ['application/pdf', 'application/octet-stream'], limit: '10mb' }),
+  async (req: AuthRequest, res: Response) => {
+    const buf = req.body as Buffer;
+    if (!Buffer.isBuffer(buf) || buf.length === 0) {
+      res.status(400).json({ success: false, error: 'No file received. Send the PDF as the raw request body.' });
+      return;
+    }
+    if (buf.subarray(0, 5).toString('latin1') !== '%PDF-') {
+      res.status(400).json({ success: false, error: 'File must be a PDF.' });
+      return;
+    }
+    const raw = (req.headers['x-filename'] as string) || 'complaint-form.pdf';
+    const filename = raw.replace(/[^\w.\- ]/g, '_').slice(0, 255) || 'complaint-form.pdf';
+    await pg`
+      INSERT INTO complaint_form (id, filename, mime, data, size, uploaded_by, uploaded_at)
+      VALUES (1, ${filename}, 'application/pdf', ${buf}, ${buf.length}, ${req.userId ?? null}, NOW())
+      ON CONFLICT (id) DO UPDATE SET
+        filename = EXCLUDED.filename, mime = EXCLUDED.mime, data = EXCLUDED.data,
+        size = EXCLUDED.size, uploaded_by = EXCLUDED.uploaded_by, uploaded_at = NOW()
+    `;
+    await logAudit({ userId: req.userId, action: 'Complaint Form Updated', detail: `${filename} (${buf.length} bytes)`, type: 'admin', severity: 'info', ipAddress: req.ip ?? undefined });
+    res.json({ success: true, data: { filename, size: buf.length } });
+  });
+
+// DELETE the published form.
+router.delete('/complaint-form', requireFullAdmin, async (req: AuthRequest, res: Response) => {
+  await pg`DELETE FROM complaint_form WHERE id = 1`;
+  await logAudit({ userId: req.userId, action: 'Complaint Form Deleted', type: 'admin', severity: 'warning', ipAddress: req.ip ?? undefined });
+  res.json({ success: true });
+});
 
 export default router;

@@ -1808,6 +1808,90 @@ const PageApplications = () => {
   );
 };
 
+// ── Page: Complaint Form ──────────────────────────────────────
+const PageComplaints = () => {
+  const [meta, setMeta] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [file, setFile] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { const r = await api('/admin/complaint-form'); if (r.success) setMeta(r.data); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { load(); }, []);
+
+  const upload = async () => {
+    if (!file) return;
+    if (file.type && file.type !== 'application/pdf') { setMsg({ ok:false, text:'Please choose a PDF file.' }); return; }
+    setBusy(true); setMsg(null);
+    try {
+      const res = await fetch('/admin/complaint-form', {
+        method:'POST',
+        headers:{ 'Authorization':`Bearer ${token}`, 'Content-Type':'application/pdf', 'X-Filename':file.name },
+        body:file,
+      });
+      const d = await res.json().catch(()=>({}));
+      if (res.ok && d.success) { setMsg({ ok:true, text:'Complaint form published.' }); setFile(null); load(); }
+      else setMsg({ ok:false, text:d.error || 'Upload failed.' });
+    } catch { setMsg({ ok:false, text:'Upload failed.' }); }
+    finally { setBusy(false); }
+  };
+
+  const del = async () => {
+    if (!window.confirm('Delete the current complaint form? Clients will no longer be able to download it.')) return;
+    setBusy(true); setMsg(null);
+    try { const r = await api('/admin/complaint-form', { method:'DELETE' }); if (r.success) { setMsg({ ok:true, text:'Complaint form deleted.' }); setMeta(null); } }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div style={{ padding:'28px 24px', maxWidth:720 }}>
+      <div style={{ marginBottom:20 }}>
+        <div style={{ fontSize:22, fontWeight:700 }}>Complaint Form</div>
+        <div style={{ fontSize:13, color:C.muted, marginTop:4 }}>The PDF that signed-in clients download from “File a Complaint” in their dashboard.</div>
+      </div>
+
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14, padding:20 }}>
+        <div style={{ fontSize:13, fontWeight:600, marginBottom:12 }}>Current form</div>
+        {loading ? (
+          <div style={{ color:C.muted, fontSize:13 }}>Loading…</div>
+        ) : meta ? (
+          <div style={{ display:'flex', alignItems:'center', gap:14, padding:'12px 14px', background:C.card2, border:`1px solid ${C.border}`, borderRadius:10 }}>
+            <Icon d={Icons.file} size={20} color={C.orange} stroke/>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontSize:13, fontWeight:600 }}>{meta.filename}</div>
+              <div style={{ fontSize:12, color:C.muted, marginTop:2 }}>{Math.round((meta.size||0)/1024)} KB · updated {timeAgo(meta.uploaded_at || meta.uploadedAt)}</div>
+            </div>
+            <button onClick={del} disabled={busy}
+              style={{ display:'flex', alignItems:'center', gap:7, padding:'8px 12px', borderRadius:8, border:`1px solid ${C.border2}`, background:'transparent', color:C.red, fontSize:13, fontWeight:600, cursor:busy?'default':'pointer', opacity:busy?.5:1 }}>
+              <Icon d={Icons.trash} size={14} color="currentColor" stroke/> Delete
+            </button>
+          </div>
+        ) : (
+          <div style={{ color:C.muted, fontSize:13, padding:'12px 14px', background:C.card2, border:`1px dashed ${C.border2}`, borderRadius:10 }}>No form is published. Clients see the tab but cannot download until you upload one.</div>
+        )}
+
+        <div style={{ height:1, background:C.border, margin:'20px 0' }}/>
+
+        <div style={{ fontSize:13, fontWeight:600, marginBottom:12 }}>{meta ? 'Replace form' : 'Upload form'} (PDF, max 10 MB)</div>
+        <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
+          <input type="file" accept="application/pdf,.pdf" onChange={e=>{ setFile(e.target.files[0]||null); setMsg(null); }}
+            style={{ fontSize:13, color:C.muted }}/>
+          <button onClick={upload} disabled={!file||busy}
+            style={{ display:'flex', alignItems:'center', gap:7, padding:'9px 16px', borderRadius:8, border:'none', background:(!file||busy)?C.border:C.orange, color:(!file||busy)?C.muted:'#001b0e', fontSize:13, fontWeight:700, cursor:(!file||busy)?'default':'pointer' }}>
+            <Icon d={Icons.download} size={14} color="currentColor" stroke/> {busy ? 'Uploading…' : (meta ? 'Replace' : 'Upload')}
+          </button>
+        </div>
+
+        {msg && <div style={{ marginTop:14, fontSize:13, color:msg.ok?C.green:C.red }}>{msg.text}</div>}
+      </div>
+    </div>
+  );
+};
+
 // ── Sidebar ───────────────────────────────────────────────────
 const NAV = [
   { id:'dashboard',     label:'Dashboard',     icon:'dashboard',  sub:'Overview'        },
@@ -1817,6 +1901,7 @@ const NAV = [
   { id:'api',           label:'API Keys',      icon:'api',        sub:'Developer Access'},
   { id:'audit',         label:'Audit Log',     icon:'audit',      sub:'Activity Trail'  },
   { id:'notifs',        label:'Notifications', icon:'bell',       sub:'Alerts'          },
+  { id:'complaints',    label:'Complaint Form', icon:'file',      sub:'Client download' },
   { id:'fireblocks',    label:'Fireblocks',    icon:'fireblocks', sub:'Custody & Vaults'},
   { id:'settings',      label:'Settings',      icon:'settings',   sub:'Configuration'   },
 ];
@@ -2020,6 +2105,7 @@ const App = () => {
     api:          () => <PageAPIKeys apiKeys={apiKeysList} reload={reload}/>,
     audit:        () => <PageAudit audit={audit}/>,
     notifs:       () => <PageNotifications notifications={notifications} reload={reload}/>,
+    complaints:   () => <PageComplaints/>,
     fireblocks:   () => <PageFireblocks users={users}/>,
     settings:     () => <PageSettings settings={settings} reload={reload}/>,
   };

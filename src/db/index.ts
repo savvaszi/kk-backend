@@ -214,6 +214,19 @@ export async function initDb() {
     )
   `;
 
+  // Single-row store for the downloadable client complaint form (id is pinned to 1).
+  await sql`
+    CREATE TABLE IF NOT EXISTS complaint_form (
+      id SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+      filename VARCHAR(255) NOT NULL,
+      mime VARCHAR(100) NOT NULL DEFAULT 'application/pdf',
+      data BYTEA NOT NULL,
+      size INTEGER NOT NULL,
+      uploaded_by UUID REFERENCES users(id) ON DELETE SET NULL,
+      uploaded_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+    )
+  `;
+
   // Safe column migrations
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS fireblocks_vault_id VARCHAR(100)`;
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS sumsub_applicant_id VARCHAR(100)`;
