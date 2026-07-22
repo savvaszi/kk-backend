@@ -92,8 +92,8 @@ document.getElementById('form').addEventListener('submit', async (e) => {
     } else {
       showErr(data.error || 'Invalid credentials');
     }
-  } catch {
-    showErr('Network error — please try again.');
+  } catch (e1) {
+    showErr('Network error (' + (e1 && e1.message ? e1.message : e1) + '). Check your connection and try again.');
   }
   btn.disabled = false;
   btn.textContent = 'Sign In';
@@ -105,20 +105,29 @@ document.getElementById('form2fa').addEventListener('submit', async (e) => {
   clearErr();
   btn.disabled = true;
   btn.textContent = 'Verifying…';
+  if (!preAuthToken) {
+    showErr('Your login session expired. Please enter your password again.');
+    document.getElementById('form2fa').style.display = 'none';
+    document.getElementById('form').style.display = 'block';
+    btn.disabled = false; btn.textContent = 'Verify';
+    return;
+  }
   try {
     const res = await fetch('/auth/login/verify-2fa', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ preAuthToken, code: document.getElementById('code').value.trim() }),
     });
-    const data = await res.json();
+    let data;
+    try { data = await res.json(); }
+    catch { showErr('Server returned a non-JSON response (HTTP ' + res.status + '). Please try again in a minute.'); btn.disabled = false; btn.textContent = 'Verify'; return; }
     if (data.success && data.data && data.data.token) {
       finishLogin(data.data);
     } else {
       showErr(data.error || 'Invalid code');
     }
-  } catch {
-    showErr('Network error — please try again.');
+  } catch (e2) {
+    showErr('Network error (' + (e2 && e2.message ? e2.message : e2) + '). Check your connection and try again.');
   }
   btn.disabled = false;
   btn.textContent = 'Verify';
