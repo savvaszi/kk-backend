@@ -44,7 +44,7 @@ async function createSession(userId: string, req: Request) {
     userId,
     tokenHash: 'bearer',
     device: req.headers['user-agent']?.slice(0, 255) ?? null,
-    ipAddress: (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ?? req.ip?.slice(0, 50) ?? null,
+    ipAddress: req.ip?.slice(0, 50) ?? null,
     isCurrent: true,
     expiresAt: tokenExpiresAt(),
   }).returning();

@@ -5,6 +5,8 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { randomUUID } from 'node:crypto';
+import type { NextFunction, Request, Response } from 'express';
 import { initDb } from './db/index.js';
 import authRouter from './routes/auth.js';
 import meRouter from './routes/me.js';
@@ -29,6 +31,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = parseInt(process.env.PORT ?? '4000', 10);
 
+// Traefik is the sole direct peer for the deployed backend. Keep the backend
+// private to Traefik; exposing it directly would allow forged forwarded IPs.
+app.set('trust proxy', 1);
+
 const ALLOWED_ORIGINS_DEFAULT = [
   'https://krypto-knight.com',
   'https://k2.krypto-knight.com',
@@ -37,6 +43,21 @@ const ALLOWED_ORIGINS_DEFAULT = [
 const origins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
   : ALLOWED_ORIGINS_DEFAULT;
+
+function authRequestDiagnostics(req: Request, res: Response, next: NextFunction) {
+  const requestId = randomUUID();
+  const startedAt = process.hrtime.bigint();
+  res.setHeader('X-Request-Id', requestId);
+  res.on('finish', () => {
+    console.info(JSON.stringify({
+      event: 'auth_request', requestId, method: req.method, path: req.path,
+      status: res.statusCode, durationMs: Number(process.hrtime.bigint() - startedAt) / 1_000_000,
+      ip: req.ip, remoteAddress: req.socket.remoteAddress,
+      forwarded: Boolean(req.headers['x-forwarded-for']),
+    }));
+  });
+  next();
+}
 
 app.use(helmet({
   contentSecurityPolicy: false,
@@ -68,7 +89,7 @@ const authLimiter = rateLimit({
     sendSecurityAlert({
       code: 'RATE_LIMIT_AUTH',
       level: 'critical',
-      ip: (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim() ?? req.ip,
+      ip: req.ip,
       path: req.path,
       detail: `Auth rate limit hit: ${options.max} requests / ${options.windowMs / 60000} min`,
     }).catch(() => {});
@@ -87,7 +108,7 @@ const apiLimiter = rateLimit({
     sendSecurityAlert({
       code: 'RATE_LIMIT_API',
       level: 'warning',
-      ip: (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim() ?? req.ip,
+      ip: req.ip,
       path: req.path,
       detail: `API rate limit hit: ${options.max} requests / ${options.windowMs / 1000} sec`,
     }).catch(() => {});
@@ -101,7 +122,7 @@ app.get('/health', (_, res) => res.json({ status: 'ok', timestamp: new Date().to
 
 app.use('/public', publicRouter);
 app.use('/public/market', marketRouter);
-app.use('/auth', authLimiter, authRouter);
+app.use('/auth', authRequestDiagnostics, authLimiter, authRouter);
 app.use('/me', apiLimiter, meRouter);
 app.use('/me/kyc', apiLimiter, kycRouter);
 app.use('/me/fireblocks', apiLimiter, fireblocksUserRouter);
