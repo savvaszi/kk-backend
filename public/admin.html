@@ -1808,86 +1808,91 @@ const PageApplications = () => {
   );
 };
 
-// ── Page: Complaint Form ──────────────────────────────────────
-const PageComplaints = () => {
-  const [meta, setMeta] = useState(null);
+// ── Page: Complaints Register ─────────────────────────────────
+const PageComplaints = ({ users=[] }) => {
+  const categories = ['Execution','Information quality','Fees','Admin','Unauthorised business','Withdrawal issues','Other','Advice','Portfolio management'];
+  const statuses = ['received','investigating','resolved','rejected','closed'];
+  const [rows, setRows] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [filters, setFilters] = useState({ status:'all', category:'all', from:'', to:'' });
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [file, setFile] = useState(null);
-  const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
+  const [meta, setMeta] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
-    try { const r = await api('/admin/complaint-form'); if (r.success) setMeta(r.data); }
-    finally { setLoading(false); }
-  }, []);
-  useEffect(() => { load(); }, []);
-
-  const upload = async () => {
-    if (!file) return;
-    if (file.type && file.type !== 'application/pdf') { setMsg({ ok:false, text:'Please choose a PDF file.' }); return; }
-    setBusy(true); setMsg(null);
     try {
-      const res = await fetch('/admin/complaint-form', {
-        method:'POST',
-        headers:{ 'Authorization':`Bearer ${token}`, 'Content-Type':'application/pdf', 'X-Filename':file.name },
-        body:file,
-      });
-      const d = await res.json().catch(()=>({}));
-      if (res.ok && d.success) { setMsg({ ok:true, text:'Complaint form published.' }); setFile(null); load(); }
-      else setMsg({ ok:false, text:d.error || 'Upload failed.' });
-    } catch { setMsg({ ok:false, text:'Upload failed.' }); }
-    finally { setBusy(false); }
+      const params = new URLSearchParams(Object.entries(filters).filter(([k,v]) => v && v !== 'all'));
+      const r = await api(`/admin/complaints?${params}`);
+      if (r.success) setRows(r.data || []);
+    }
+    finally { setLoading(false); }
+  }, [filters]);
+  useEffect(() => { load(); }, [load]);
+
+  const open = async (row) => {
+    const r = await api(`/admin/complaints/${row.id}`);
+    if (r.success) setSelected(r.data);
   };
 
-  const del = async () => {
-    if (!window.confirm('Delete the current complaint form? Clients will no longer be able to download it.')) return;
-    setBusy(true); setMsg(null);
-    try { const r = await api('/admin/complaint-form', { method:'DELETE' }); if (r.success) { setMsg({ ok:true, text:'Complaint form deleted.' }); setMeta(null); } }
-    finally { setBusy(false); }
+  const save = async () => {
+    if (!selected) return;
+    setSaving(true); setMsg(null);
+    try {
+      const r = await api(`/admin/complaints/${selected.id}`, { method:'PATCH', body:JSON.stringify({ status:selected.status, category:selected.category||null, assignedTo:selected.assigned_to||null, internalNotes:selected.internal_notes||'', resolutionSummary:selected.resolution_summary||'' }) });
+      if (r.success) { setSelected({...selected, ...r.data}); setMsg({ ok:true, text:'Complaint updated.' }); load(); }
+      else setMsg({ ok:false, text:r.error || 'Update failed.' });
+    } catch { setMsg({ ok:false, text:'Update failed.' }); }
+    finally { setSaving(false); }
+  };
+
+  const exportReport = async () => {
+    const params = new URLSearchParams({ format:'csv' });
+    Object.entries(filters).forEach(([k,v]) => { if (v && v !== 'all') params.set(k, v); });
+    const res = await fetch(`/admin/complaints/report?${params}`, { headers:{ 'Authorization':`Bearer ${token}` } });
+    if (!res.ok) { setMsg({ ok:false, text:'Report export failed.' }); return; }
+    const blob = await res.blob(); const url = URL.createObjectURL(blob); const a = document.createElement('a');
+    a.href = url; a.download = 'complaints-report.csv'; a.click(); URL.revokeObjectURL(url);
   };
 
   return (
-    <div style={{ padding:'28px 24px', maxWidth:720 }}>
+    <div style={{ padding:'28px 24px', maxWidth:1400 }}>
       <div style={{ marginBottom:20 }}>
-        <div style={{ fontSize:22, fontWeight:700 }}>Complaint Form</div>
-        <div style={{ fontSize:13, color:C.muted, marginTop:4 }}>The PDF that signed-in clients download from “File a Complaint” in their dashboard.</div>
+        <div style={{ fontSize:22, fontWeight:700 }}>Complaints Register</div>
+        <div style={{ fontSize:13, color:C.muted, marginTop:4 }}>Formal client complaints submitted to Compliance. Routine support messages are not included.</div>
       </div>
-
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14, padding:20 }}>
-        <div style={{ fontSize:13, fontWeight:600, marginBottom:12 }}>Current form</div>
-        {loading ? (
-          <div style={{ color:C.muted, fontSize:13 }}>Loading…</div>
-        ) : meta ? (
-          <div style={{ display:'flex', alignItems:'center', gap:14, padding:'12px 14px', background:C.card2, border:`1px solid ${C.border}`, borderRadius:10 }}>
-            <Icon d={Icons.file} size={20} color={C.orange} stroke/>
-            <div style={{ flex:1, minWidth:0 }}>
-              <div style={{ fontSize:13, fontWeight:600 }}>{meta.filename}</div>
-              <div style={{ fontSize:12, color:C.muted, marginTop:2 }}>{Math.round((meta.size||0)/1024)} KB · updated {timeAgo(meta.uploaded_at || meta.uploadedAt)}</div>
-            </div>
-            <button onClick={del} disabled={busy}
-              style={{ display:'flex', alignItems:'center', gap:7, padding:'8px 12px', borderRadius:8, border:`1px solid ${C.border2}`, background:'transparent', color:C.red, fontSize:13, fontWeight:600, cursor:busy?'default':'pointer', opacity:busy?.5:1 }}>
-              <Icon d={Icons.trash} size={14} color="currentColor" stroke/> Delete
-            </button>
-          </div>
-        ) : (
-          <div style={{ color:C.muted, fontSize:13, padding:'12px 14px', background:C.card2, border:`1px dashed ${C.border2}`, borderRadius:10 }}>No form is published. Clients see the tab but cannot download until you upload one.</div>
-        )}
-
-        <div style={{ height:1, background:C.border, margin:'20px 0' }}/>
-
-        <div style={{ fontSize:13, fontWeight:600, marginBottom:12 }}>{meta ? 'Replace form' : 'Upload form'} (PDF, max 10 MB)</div>
-        <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
-          <input type="file" accept="application/pdf,.pdf" onChange={e=>{ setFile(e.target.files[0]||null); setMsg(null); }}
-            style={{ fontSize:13, color:C.muted }}/>
-          <button onClick={upload} disabled={!file||busy}
-            style={{ display:'flex', alignItems:'center', gap:7, padding:'9px 16px', borderRadius:8, border:'none', background:(!file||busy)?C.border:C.orange, color:(!file||busy)?C.muted:'#001b0e', fontSize:13, fontWeight:700, cursor:(!file||busy)?'default':'pointer' }}>
-            <Icon d={Icons.download} size={14} color="currentColor" stroke/> {busy ? 'Uploading…' : (meta ? 'Replace' : 'Upload')}
-          </button>
+      <div style={{ display:'flex', gap:10, flexWrap:'wrap', marginBottom:18 }}>
+        <select value={filters.status} onChange={e=>setFilters(f=>({...f,status:e.target.value}))} style={{ background:C.card, color:C.text, border:`1px solid ${C.border}`, borderRadius:8, padding:'8px 10px', fontSize:12 }}><option value="all">All statuses</option>{statuses.map(s=><option key={s}>{s}</option>)}</select>
+        <select value={filters.category} onChange={e=>setFilters(f=>({...f,category:e.target.value}))} style={{ background:C.card, color:C.text, border:`1px solid ${C.border}`, borderRadius:8, padding:'8px 10px', fontSize:12 }}><option value="all">All categories</option>{categories.map(c=><option key={c}>{c}</option>)}</select>
+        <input type="date" value={filters.from} onChange={e=>setFilters(f=>({...f,from:e.target.value}))} style={{ background:C.card, color:C.text, border:`1px solid ${C.border}`, borderRadius:8, padding:'8px 10px', fontSize:12 }}/>
+        <input type="date" value={filters.to} onChange={e=>setFilters(f=>({...f,to:e.target.value}))} style={{ background:C.card, color:C.text, border:`1px solid ${C.border}`, borderRadius:8, padding:'8px 10px', fontSize:12 }}/>
+        <Btn icon="download" onClick={exportReport}>Export CSV</Btn>
+      </div>
+      {msg && <div style={{ marginBottom:14, fontSize:13, color:msg.ok?C.green:C.red }}>{msg.text}</div>}
+      <div style={{ display:'flex', gap:12, marginBottom:18, flexWrap:'wrap' }}>
+        <StatCard label="Total" value={rows.length} icon="file" color="blue" sub="filtered" />
+        <StatCard label="Received" value={rows.filter(r=>r.status==='received').length} icon="activity" color="yellow" sub="awaiting review" />
+        <StatCard label="Investigating" value={rows.filter(r=>r.status==='investigating').length} icon="search" color="purple" sub="in progress" />
+        <StatCard label="Resolved" value={rows.filter(r=>r.status==='resolved').length} icon="check" color="green" sub="completed" />
+      </div>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, overflow:'auto' }}>
+        {loading ? <Loading/> : rows.length === 0 ? <div style={{ padding:30, color:C.muted, fontSize:13 }}>No complaints match these filters.</div> : <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}><thead><tr>{['Reference','Client','Submitted','Status','Category','Age',''].map(h=><th key={h} style={{ textAlign:'left', padding:'12px 14px', color:C.muted, fontWeight:600, borderBottom:`1px solid ${C.border}`, whiteSpace:'nowrap' }}>{h}</th>)}</tr></thead><tbody>{rows.map(row=><tr key={row.id} onClick={()=>open(row)} style={{ cursor:'pointer' }} onMouseEnter={e=>e.currentTarget.style.background=C.card2} onMouseLeave={e=>e.currentTarget.style.background='transparent'}><td style={{ padding:'12px 14px', fontWeight:700, color:C.orange }}>{row.reference}</td><td style={{ padding:'12px 14px' }}>{row.user_name || row.user_email}</td><td style={{ padding:'12px 14px', color:C.muted }}>{fmtDate(row.submitted_at)}</td><td style={{ padding:'12px 14px' }}><Badge color={row.status==='resolved'?'green':row.status==='received'?'yellow':'blue'}>{row.status}</Badge></td><td style={{ padding:'12px 14px', color:C.muted }}>{row.category || 'Unclassified'}</td><td style={{ padding:'12px 14px', color:C.muted }}>{timeAgo(row.submitted_at)}</td><td style={{ padding:'12px 14px', color:C.orange }}>View →</td></tr>)}</tbody></table>}
+      </div>
+      {selected && <div style={{ marginTop:18, background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:22 }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:18 }}><div><div style={{ fontSize:17, fontWeight:700 }}>{selected.reference}</div><div style={{ fontSize:12, color:C.muted, marginTop:4 }}>{selected.user_name || selected.user_email} · submitted {fmtDate(selected.submitted_at)}</div></div><Btn variant="ghost" onClick={()=>setSelected(null)}>Close ✕</Btn></div>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(220px,1fr))', gap:14, marginBottom:18 }}>
+          <label style={{ fontSize:12, color:C.muted }}>Status<select value={selected.status} onChange={e=>setSelected({...selected,status:e.target.value})} style={{ display:'block', width:'100%', marginTop:6, background:C.card2, color:C.text, border:`1px solid ${C.border}`, borderRadius:7, padding:8 }}>{statuses.map(s=><option key={s}>{s}</option>)}</select></label>
+          <label style={{ fontSize:12, color:C.muted }}>Category<select value={selected.category||''} onChange={e=>setSelected({...selected,category:e.target.value||null})} style={{ display:'block', width:'100%', marginTop:6, background:C.card2, color:C.text, border:`1px solid ${C.border}`, borderRadius:7, padding:8 }}><option value="">Unclassified</option>{categories.map(c=><option key={c}>{c}</option>)}</select></label>
+          <label style={{ fontSize:12, color:C.muted }}>Assigned Compliance user<select value={selected.assigned_to||''} onChange={e=>setSelected({...selected,assigned_to:e.target.value||null})} style={{ display:'block', width:'100%', marginTop:6, background:C.card2, color:C.text, border:`1px solid ${C.border}`, borderRadius:7, padding:8 }}><option value="">Unassigned</option>{users.filter(u=>u.isAdmin).map(u=><option key={u.id} value={u.id}>{displayName(u)}</option>)}</select></label>
         </div>
-
-        {msg && <div style={{ marginTop:14, fontSize:13, color:msg.ok?C.green:C.red }}>{msg.text}</div>}
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(280px,1fr))', gap:18 }}><div><div style={{ fontSize:12, color:C.muted, marginBottom:6 }}>Complaint details</div><div style={{ whiteSpace:'pre-wrap', fontSize:13, lineHeight:1.6 }}>{selected.description}</div><div style={{ fontSize:12, color:C.muted, marginTop:14, marginBottom:6 }}>Desired outcome</div><div style={{ whiteSpace:'pre-wrap', fontSize:13 }}>{selected.desired_outcome}</div></div><div><label style={{ display:'block', fontSize:12, color:C.muted }}>Internal notes<textarea value={selected.internal_notes||''} onChange={e=>setSelected({...selected,internal_notes:e.target.value})} style={{ display:'block', width:'100%', minHeight:100, marginTop:6, background:C.card2, color:C.text, border:`1px solid ${C.border}`, borderRadius:7, padding:9, fontFamily:'inherit' }}/></label><label style={{ display:'block', fontSize:12, color:C.muted, marginTop:12 }}>Resolution summary<textarea value={selected.resolution_summary||''} onChange={e=>setSelected({...selected,resolution_summary:e.target.value})} style={{ display:'block', width:'100%', minHeight:80, marginTop:6, background:C.card2, color:C.text, border:`1px solid ${C.border}`, borderRadius:7, padding:9, fontFamily:'inherit' }}/></label></div></div>
+        {(selected.attachments||[]).length > 0 && <div style={{ marginTop:18 }}><div style={{ fontSize:12, color:C.muted, marginBottom:8 }}>Evidence</div>{selected.attachments.map(a=><Btn key={a.id} variant="ghost" size="sm" onClick={()=>window.open(`/admin/complaints/${selected.id}/attachments/${a.id}`, '_blank')}>{a.filename} ({Math.round(a.size/1024)} KB)</Btn>)}</div>}
+        {(selected.events||[]).length > 0 && <div style={{ marginTop:18 }}><div style={{ fontSize:12, color:C.muted, marginBottom:8 }}>Case history</div>{selected.events.map((event,i)=><div key={i} style={{ display:'flex', gap:10, padding:'8px 0', borderTop:i?`1px solid ${C.border}`:'none', fontSize:12 }}><span style={{ color:C.muted, whiteSpace:'nowrap' }}>{fmtDate(event.created_at)}</span><span style={{ flex:1 }}>{event.action}{event.detail?` — ${event.detail}`:''}</span><span style={{ color:C.muted }}>{event.user_name||''}</span></div>)}</div>}
+        <div style={{ marginTop:20, display:'flex', justifyContent:'flex-end' }}><Btn onClick={save} disabled={saving}>{saving?'Saving…':'Save changes'}</Btn></div>
       </div>
+      <div style={{ marginTop:24, background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:18 }}><div style={{ fontSize:13, fontWeight:600, marginBottom:8 }}>Legacy PDF form</div><div style={{ fontSize:12, color:C.muted, marginBottom:12 }}>Kept temporarily for clients who still need the previous submission route.</div><input type="file" accept="application/pdf,.pdf" onChange={e=>setFile(e.target.files[0]||null)} style={{ fontSize:12, color:C.muted }}/><Btn disabled={!file} style={{ marginLeft:10 }} onClick={async()=>{const res=await fetch('/admin/complaint-form',{method:'POST',headers:{'Authorization':`Bearer ${token}`,'Content-Type':'application/pdf','X-Filename':file.name},body:file});const d=await res.json().catch(()=>({}));setMsg({ok:res.ok&&d.success,text:res.ok&&d.success?'Legacy form published.':d.error||'Upload failed.'});setFile(null);}}>Publish PDF</Btn></div>
     </div>
   );
 };
@@ -1901,7 +1906,7 @@ const NAV = [
   { id:'api',           label:'API Keys',      icon:'api',        sub:'Developer Access'},
   { id:'audit',         label:'Audit Log',     icon:'audit',      sub:'Activity Trail'  },
   { id:'notifs',        label:'Notifications', icon:'bell',       sub:'Alerts'          },
-  { id:'complaints',    label:'Complaint Form', icon:'file',      sub:'Client download' },
+  { id:'complaints',    label:'Complaints',    icon:'file',      sub:'Register & reporting' },
   { id:'fireblocks',    label:'Fireblocks',    icon:'fireblocks', sub:'Custody & Vaults'},
   { id:'settings',      label:'Settings',      icon:'settings',   sub:'Configuration'   },
 ];
@@ -2105,7 +2110,7 @@ const App = () => {
     api:          () => <PageAPIKeys apiKeys={apiKeysList} reload={reload}/>,
     audit:        () => <PageAudit audit={audit}/>,
     notifs:       () => <PageNotifications notifications={notifications} reload={reload}/>,
-    complaints:   () => <PageComplaints/>,
+    complaints:   () => <PageComplaints users={users}/>,
     fireblocks:   () => <PageFireblocks users={users}/>,
     settings:     () => <PageSettings settings={settings} reload={reload}/>,
   };

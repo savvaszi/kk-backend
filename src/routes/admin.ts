@@ -447,6 +447,132 @@ function safeUser(u: typeof users.$inferSelect) {
   return safe;
 }
 
+const COMPLAINT_CATEGORIES = ['Execution', 'Information quality', 'Fees', 'Admin', 'Unauthorised business', 'Withdrawal issues', 'Other', 'Advice', 'Portfolio management'];
+const COMPLAINT_STATUSES = ['received', 'investigating', 'resolved', 'rejected', 'closed'];
+const isUuid = (value: unknown) => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+
+const complaintRows = async () => pg`
+  SELECT c.*, u.email AS user_email,
+    CONCAT_WS(' ', u.first_name, u.last_name) AS user_name,
+    CONCAT_WS(' ', a.first_name, a.last_name) AS assignee_name
+  FROM complaints c
+  LEFT JOIN users u ON u.id = c.user_id
+  LEFT JOIN users a ON a.id = c.assigned_to
+  ORDER BY c.submitted_at DESC
+  LIMIT 1000
+`;
+
+function filterComplaints(rows: any[], query: Record<string, string>) {
+  const from = query.from ? new Date(`${query.from}T00:00:00.000Z`).getTime() : 0;
+  const to = query.to ? new Date(`${query.to}T23:59:59.999Z`).getTime() : Number.MAX_SAFE_INTEGER;
+  return rows.filter(row =>
+    (!query.status || query.status === 'all' || row.status === query.status) &&
+    (!query.category || query.category === 'all' || row.category === query.category) &&
+    new Date(row.submitted_at).getTime() >= from && new Date(row.submitted_at).getTime() <= to
+  );
+}
+
+function csvCell(value: unknown) {
+  return `"${String(value ?? '').replace(/"/g, '""').replace(/[\r\n]+/g, ' ')}"`;
+}
+
+function complaintsCsv(rows: any[]) {
+  const fields = ['reference', 'client_name', 'client_email', 'status', 'category', 'submitted_at', 'acknowledged_at', 'resolved_at', 'affected_date', 'affected_transaction', 'desired_outcome', 'resolution_summary'];
+  return [fields.join(','), ...rows.map(row => fields.map(field => csvCell(row[field])).join(','))].join('\r\n');
+}
+
+// ── Complaints register ─────────────────────────────────────────────────────
+router.get('/complaints', requireFullAdmin, async (req: AuthRequest, res: Response) => {
+  const rows = filterComplaints(await complaintRows(), req.query as Record<string, string>);
+  res.json({ success: true, data: rows.map(({ internal_notes: _internal, ...row }) => row) });
+});
+
+router.get('/complaints/report', requireFullAdmin, async (req: AuthRequest, res: Response) => {
+  const rows = filterComplaints(await complaintRows(), req.query as Record<string, string>);
+  const summary = {
+    total: rows.length,
+    byStatus: Object.fromEntries(COMPLAINT_STATUSES.map(status => [status, rows.filter(row => row.status === status).length])),
+    byCategory: Object.fromEntries(COMPLAINT_CATEGORIES.map(category => [category, rows.filter(row => row.category === category).length])),
+  };
+  await logAudit({ userId: req.userId, action: 'Complaint Report Exported', detail: `${rows.length} complaints`, type: 'admin', severity: 'info', ipAddress: req.ip });
+  if ((req.query.format as string) === 'csv') {
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="complaints-report.csv"');
+    res.send(complaintsCsv(rows));
+    return;
+  }
+  res.json({ success: true, data: { summary, csv: complaintsCsv(rows) } });
+});
+
+router.get('/complaints/:id/attachments/:attachmentId', requireFullAdmin, async (req: AuthRequest, res: Response) => {
+  const rows = await pg`
+    SELECT a.filename, a.mime, a.data
+    FROM complaint_attachments a
+    WHERE a.id = ${req.params.attachmentId} AND a.complaint_id = ${req.params.id}
+  `;
+  if (!rows[0]) { res.status(404).json({ success: false, error: 'Attachment not found' }); return; }
+  await logAudit({ userId: req.userId, action: 'Complaint Attachment Accessed', detail: `${req.params.id}/${req.params.attachmentId}`, type: 'admin', severity: 'info', ipAddress: req.ip, metadata: { complaintId: req.params.id } });
+  res.setHeader('Content-Type', rows[0].mime);
+  res.setHeader('Content-Disposition', `attachment; filename="${String(rows[0].filename).replace(/["\r\n]/g, '_')}"`);
+  res.send(rows[0].data);
+});
+
+router.get('/complaints/:id', requireFullAdmin, async (req: AuthRequest, res: Response) => {
+  const rows = await pg`
+    SELECT c.*, u.email AS user_email,
+      CONCAT_WS(' ', u.first_name, u.last_name) AS user_name,
+      CONCAT_WS(' ', a.first_name, a.last_name) AS assignee_name
+    FROM complaints c
+    LEFT JOIN users u ON u.id = c.user_id
+    LEFT JOIN users a ON a.id = c.assigned_to
+    WHERE c.id = ${req.params.id}
+  `;
+  if (!rows[0]) { res.status(404).json({ success: false, error: 'Complaint not found' }); return; }
+  const attachments = await pg`SELECT id, filename, mime, size, uploaded_at FROM complaint_attachments WHERE complaint_id = ${req.params.id} ORDER BY uploaded_at`;
+  const events = await pg`
+    SELECT action, detail, severity, user_name, created_at
+    FROM audit_logs
+    WHERE metadata->>'complaintId' = ${req.params.id}
+    ORDER BY created_at DESC
+  `;
+  res.json({ success: true, data: { ...rows[0], attachments, events } });
+});
+
+router.patch('/complaints/:id', requireFullAdmin, async (req: AuthRequest, res: Response) => {
+  const body = req.body as Record<string, unknown>;
+  if (body.status !== undefined && !COMPLAINT_STATUSES.includes(String(body.status))) {
+    res.status(400).json({ success: false, error: 'Invalid complaint status' }); return;
+  }
+  if (body.category !== undefined && body.category !== null && !COMPLAINT_CATEGORIES.includes(String(body.category))) {
+    res.status(400).json({ success: false, error: 'Invalid complaint category' }); return;
+  }
+  if (body.assignedTo !== undefined && body.assignedTo !== null && !isUuid(body.assignedTo)) {
+    res.status(400).json({ success: false, error: 'Invalid assignee' }); return;
+  }
+  const status = body.status === undefined ? null : String(body.status);
+  const category = body.category === undefined ? null : body.category === null ? null : String(body.category);
+  const internalNotes = body.internalNotes === undefined ? null : String(body.internalNotes || '');
+  const resolutionSummary = body.resolutionSummary === undefined ? null : String(body.resolutionSummary || '');
+  const assignedTo = body.assignedTo === undefined ? null : body.assignedTo;
+  const assignedToValue = assignedTo === null ? null : String(assignedTo);
+  const result = await pg`
+    UPDATE complaints SET
+      status = COALESCE(${status}, status),
+      category = CASE WHEN ${body.category === undefined} THEN category ELSE ${category} END,
+      internal_notes = CASE WHEN ${body.internalNotes === undefined} THEN internal_notes ELSE ${internalNotes} END,
+      resolution_summary = CASE WHEN ${body.resolutionSummary === undefined} THEN resolution_summary ELSE ${resolutionSummary} END,
+      assigned_to = CASE WHEN ${body.assignedTo === undefined} THEN assigned_to ELSE ${assignedToValue} END,
+      acknowledged_at = CASE WHEN ${status} IN ('investigating', 'resolved', 'rejected', 'closed') AND acknowledged_at IS NULL THEN NOW() ELSE acknowledged_at END,
+      resolved_at = CASE WHEN ${status} IN ('resolved', 'rejected', 'closed') THEN COALESCE(resolved_at, NOW()) WHEN ${status} = 'investigating' THEN NULL ELSE resolved_at END,
+      updated_at = NOW()
+    WHERE id = ${req.params.id}
+    RETURNING *
+  `;
+  if (!result[0]) { res.status(404).json({ success: false, error: 'Complaint not found' }); return; }
+  await logAudit({ userId: req.userId, action: 'Complaint Updated', detail: `${result[0].reference}: ${result[0].status}${result[0].category ? ` · ${result[0].category}` : ''}`, type: 'admin', severity: 'info', ipAddress: req.ip, metadata: { complaintId: req.params.id, fields: Object.keys(body) } });
+  res.json({ success: true, data: result[0] });
+});
+
 // ── Complaint form (single downloadable PDF for clients) ──────────────────────
 // GET metadata of the currently published form (null if none).
 router.get('/complaint-form', requireFullAdmin, async (_req: AuthRequest, res: Response) => {

@@ -1,4 +1,6 @@
-import { pgTable, uuid, varchar, boolean, smallint, text, jsonb, timestamp, numeric } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, boolean, smallint, text, jsonb, timestamp, numeric, integer, customType } from 'drizzle-orm/pg-core';
+
+const bytea = customType<{ dataType: 'bytea'; data: Buffer; driverData: Buffer }>({ dataType: () => 'bytea' });
 
 export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -173,6 +175,40 @@ export const applications = pgTable('applications', {
   data: jsonb('data').notNull().$type<Record<string, string>>(),
   documents: jsonb('documents').notNull().$type<Array<{ name: string; mimetype: string; size: number; data: string }>>().default([]),
   submittedAt: timestamp('submitted_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const complaints = pgTable('complaints', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  reference: varchar('reference', { length: 40 }).unique().notNull(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  clientName: varchar('client_name', { length: 255 }).notNull(),
+  clientEmail: varchar('client_email', { length: 255 }).notNull(),
+  clientPhone: varchar('client_phone', { length: 50 }),
+  clientAddress: text('client_address'),
+  accountNumber: varchar('account_number', { length: 100 }),
+  description: text('description').notNull(),
+  affectedDate: varchar('affected_date', { length: 50 }),
+  affectedTransaction: varchar('affected_transaction', { length: 255 }),
+  desiredOutcome: text('desired_outcome').notNull(),
+  category: varchar('category', { length: 50 }),
+  status: varchar('status', { length: 20 }).default('received').notNull(),
+  internalNotes: text('internal_notes'),
+  resolutionSummary: text('resolution_summary'),
+  assignedTo: uuid('assigned_to').references(() => users.id, { onDelete: 'set null' }),
+  submittedAt: timestamp('submitted_at', { withTimezone: true }).defaultNow().notNull(),
+  acknowledgedAt: timestamp('acknowledged_at', { withTimezone: true }),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const complaintAttachments = pgTable('complaint_attachments', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  complaintId: uuid('complaint_id').notNull().references(() => complaints.id, { onDelete: 'cascade' }),
+  filename: varchar('filename', { length: 255 }).notNull(),
+  mime: varchar('mime', { length: 100 }).notNull(),
+  size: integer('size').notNull(),
+  data: bytea('data').notNull(),
+  uploadedAt: timestamp('uploaded_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
 export const fireblocksEvents = pgTable('fireblocks_events', {

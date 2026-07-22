@@ -227,6 +227,44 @@ export async function initDb() {
     )
   `;
 
+  await sql`
+    CREATE TABLE IF NOT EXISTS complaints (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      reference VARCHAR(40) UNIQUE NOT NULL,
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+      client_name VARCHAR(255) NOT NULL,
+      client_email VARCHAR(255) NOT NULL,
+      client_phone VARCHAR(50),
+      client_address TEXT,
+      account_number VARCHAR(100),
+      description TEXT NOT NULL,
+      affected_date VARCHAR(50),
+      affected_transaction VARCHAR(255),
+      desired_outcome TEXT NOT NULL,
+      category VARCHAR(50),
+      status VARCHAR(20) NOT NULL DEFAULT 'received',
+      internal_notes TEXT,
+      resolution_summary TEXT,
+      assigned_to UUID REFERENCES users(id) ON DELETE SET NULL,
+      submitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      acknowledged_at TIMESTAMPTZ,
+      resolved_at TIMESTAMPTZ,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS complaint_attachments (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      complaint_id UUID NOT NULL REFERENCES complaints(id) ON DELETE CASCADE,
+      filename VARCHAR(255) NOT NULL,
+      mime VARCHAR(100) NOT NULL,
+      size INTEGER NOT NULL,
+      data BYTEA NOT NULL,
+      uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+
   // Safe column migrations
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS fireblocks_vault_id VARCHAR(100)`;
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS sumsub_applicant_id VARCHAR(100)`;

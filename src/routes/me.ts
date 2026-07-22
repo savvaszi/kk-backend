@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { db, sql as pg } from '../db/index.js';
 import { users, userSessions, apiKeys, wallets, auditLogs } from '../db/schema.js';
 import { eq, and, gt, desc } from 'drizzle-orm';
@@ -10,6 +10,9 @@ import { generateKeyId, generateRawKey, hashKey } from '../lib/apiKey.js';
 import { verifyPassword, hashPassword, matchesPasswordHistory, pushPasswordHistory } from '../lib/password.js';
 import { generateSecret, generateURI, verifySync } from 'otplib';
 import QRCode from 'qrcode';
+import multer from 'multer';
+import { randomUUID } from 'node:crypto';
+import { sendMail, getRecipient } from '../lib/mailer.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -491,6 +494,113 @@ function safeUser(u: typeof users.$inferSelect) {
   void passwordResetToken; void passwordResetExpiresAt; void passwordHistory;
   return safe;
 }
+
+const complaintUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { files: 3, fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = ['application/pdf', 'image/jpeg', 'image/png', 'text/plain'];
+    if (!allowed.includes(file.mimetype)) cb(new Error('Unsupported attachment type'));
+    else cb(null, true);
+  },
+});
+const complaintUploadMiddleware = (req: Request, res: Response, next: (err?: unknown) => void) => {
+  complaintUpload.array('attachments', 3)(req, res, err => {
+    if (err) { res.status(400).json({ success: false, error: err.message || 'Invalid attachment' }); return; }
+    next();
+  });
+};
+
+const htmlEscape = (value: unknown) => String(value ?? '')
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+// ── Native complaints register ──────────────────────────────────────────────
+router.post('/complaints', complaintUploadMiddleware, async (req: AuthRequest, res: Response) => {
+  const description = String(req.body.description || '').trim();
+  const desiredOutcome = String(req.body.desiredOutcome || '').trim();
+  if (description.length < 10 || desiredOutcome.length < 3) {
+    res.status(400).json({ success: false, error: 'A detailed complaint and desired outcome are required.' });
+    return;
+  }
+  const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+  if (files.some(file => !file.buffer?.length)) {
+    res.status(400).json({ success: false, error: 'One or more attachments could not be read.' });
+    return;
+  }
+  if (files.reduce((sum, file) => sum + file.size, 0) > 20 * 1024 * 1024) {
+    res.status(400).json({ success: false, error: 'Attachments must be 20 MB or smaller in total.' });
+    return;
+  }
+
+  const recent = await pg`
+    SELECT COUNT(*)::int AS count FROM complaints
+    WHERE user_id = ${req.userId!} AND submitted_at > NOW() - INTERVAL '24 hours'
+  `;
+  if (Number(recent[0]?.count ?? 0) >= 5) {
+    res.status(429).json({ success: false, error: 'Too many complaints submitted recently. Please contact Compliance if this is urgent.' });
+    return;
+  }
+
+  const [user] = await db.select().from(users).where(eq(users.id, req.userId!)).limit(1);
+  if (!user) { res.status(401).json({ success: false, error: 'Account not accessible' }); return; }
+  const clientName = [user.firstName, user.lastName].filter(Boolean).join(' ') || user.username || user.email;
+  const clientAddress = [user.streetAddress, user.city, user.state, user.zip, user.country].filter(Boolean).join(', ') || null;
+  const id = randomUUID();
+  const reference = `KK-C-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${id.slice(0, 8).toUpperCase()}`;
+
+  await pg.begin(async sql => {
+    await sql`
+      INSERT INTO complaints (
+        id, reference, user_id, client_name, client_email, client_phone, client_address,
+        account_number, description, affected_date, affected_transaction, desired_outcome
+      ) VALUES (
+        ${id}, ${reference}, ${user.id}, ${clientName}, ${user.email}, ${user.phone ?? null}, ${clientAddress},
+        ${String(req.body.accountNumber || '').trim() || null}, ${description},
+        ${String(req.body.affectedDate || '').trim() || null}, ${String(req.body.affectedTransaction || '').trim() || null}, ${desiredOutcome}
+      )
+    `;
+    for (const file of files) {
+      const filename = file.originalname.replace(/[^\w.\- ]/g, '_').slice(0, 255) || 'evidence';
+      await sql`
+        INSERT INTO complaint_attachments (complaint_id, filename, mime, size, data)
+        VALUES (${id}, ${filename}, ${file.mimetype}, ${file.size}, ${file.buffer})
+      `;
+    }
+  });
+
+  await logAudit({
+    userId: user.id, userName: user.email, action: 'Complaint Submitted',
+    detail: `${reference} submitted`, type: 'admin', severity: 'info', ipAddress: req.ip,
+    metadata: { complaintId: id, reference }, notify: true,
+  });
+
+  const recipient = process.env.COMPLAINTS_EMAIL || await getRecipient();
+  await Promise.allSettled([
+    sendMail({
+      to: user.email,
+      subject: `Krypto Knight complaint received — ${reference}`,
+      html: `<p>We have received your formal complaint.</p><p>Your reference number is <strong>${htmlEscape(reference)}</strong>.</p><p>Our Compliance Department will review it and contact you according to our <a href="https://krypto-knight.com/complaints-procedure">Complaints Procedure</a>.</p>`,
+    }),
+    sendMail({
+      to: recipient,
+      subject: `New complaint — ${reference}`,
+      replyTo: user.email,
+      html: `<p>A new complaint has been submitted by ${htmlEscape(clientName)} (${htmlEscape(user.email)}).</p><p>Reference: <strong>${htmlEscape(reference)}</strong></p><p>Review it in the admin complaints register.</p>`,
+    }),
+  ]);
+
+  res.status(201).json({ success: true, data: { id, reference, submittedAt: new Date().toISOString(), status: 'received' } });
+});
+
+router.get('/complaints/:id', async (req: AuthRequest, res: Response) => {
+  const rows = await pg`
+    SELECT id, reference, status, submitted_at, updated_at
+    FROM complaints WHERE id = ${req.params.id} AND user_id = ${req.userId!}
+  `;
+  if (!rows[0]) { res.status(404).json({ success: false, error: 'Complaint not found' }); return; }
+  res.json({ success: true, data: rows[0] });
+});
 
 // ── Complaint form (downloadable by any authenticated client) ─────────────────
 // Lightweight availability check for the dashboard UI.
