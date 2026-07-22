@@ -221,8 +221,8 @@ const AccountSecuritySetup = ({ user, onComplete }) => {
           <div style={{ color:C.muted, fontSize:12, lineHeight:1.55, marginBottom:10 }}>Scan the QR code, or enter this setup key manually:</div>
           <code style={{ display:'block', background:C.card2, border:`1px solid ${C.border}`, borderRadius:8, padding:'10px 12px', color:C.text, fontSize:13, letterSpacing:1.2, wordBreak:'break-all', marginBottom:18 }}>{setup.secret}</code>
           <form onSubmit={confirm}>
-            <label style={{ display:'block', color:C.muted, fontSize:12, marginBottom:6 }}>Authentication code</label>
-            <input value={code} onChange={e=>setCode(e.target.value.replace(/\D/g,'').slice(0,6))} inputMode="numeric" autoComplete="one-time-code" autoFocus placeholder="000000" style={{ width:'100%', background:C.card2, color:C.text, border:`1px solid ${error?C.red:C.border}`, borderRadius:8, padding:'11px 12px', fontSize:18, letterSpacing:5, outline:'none', marginBottom:10 }}/>
+            <label htmlFor="admin-2fa-code" style={{ display:'block', color:C.muted, fontSize:12, marginBottom:6 }}>Authentication code</label>
+            <input id="admin-2fa-code" value={code} onChange={e=>setCode(e.target.value.replace(/\D/g,'').slice(0,6))} inputMode="numeric" autoComplete="one-time-code" autoFocus placeholder="000000" style={{ width:'100%', background:C.card2, color:C.text, border:`1px solid ${error?C.red:C.border}`, borderRadius:8, padding:'11px 12px', fontSize:18, letterSpacing:5, outline:'none', marginBottom:10 }}/>
             {error && <div style={{ color:C.red, fontSize:12, marginBottom:12 }}>{error}</div>}
             <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}><Btn variant="ghost" onClick={begin} disabled={working}>New QR code</Btn><Btn type="submit" disabled={working||code.length!==6}>{working?'Verifying…':'Verify and enable'}</Btn></div>
           </form>
