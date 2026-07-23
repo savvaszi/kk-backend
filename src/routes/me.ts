@@ -648,6 +648,16 @@ router.post('/complaints', complaintUploadMiddleware, async (req: AuthRequest, r
   res.status(201).json({ success: true, data: { id, reference, submittedAt: new Date().toISOString(), status: 'received' } });
 });
 
+router.get('/complaints', async (req: AuthRequest, res: Response) => {
+  const rows = await pg`
+    SELECT id, reference, status, submitted_at, updated_at
+    FROM complaints
+    WHERE user_id = ${req.userId!}
+    ORDER BY submitted_at DESC
+  `;
+  res.json({ success: true, data: rows });
+});
+
 router.get('/complaints/:id', async (req: AuthRequest, res: Response) => {
   const rows = await pg`
     SELECT id, reference, status, submitted_at, updated_at
